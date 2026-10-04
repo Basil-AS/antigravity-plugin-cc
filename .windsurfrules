@@ -1,0 +1,3 @@
+Read and follow AGENTS.md and .agents/reference/UNIVERSAL_AGENT_BOOTSTRAP.md.
+Restore .agents/state/CURRENT.md before editing. Preserve unknown work.
+Canonical task memory is .agents/, not chat memory.

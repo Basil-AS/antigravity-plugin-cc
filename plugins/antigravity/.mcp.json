@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "antigravity": {
+      "command": "node",
+      "args": [
+        "-e",
+        "process.env.AGY_MCP_STDIO='1';const p=require('node:path');const r=String(process.env.AGY_PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT);const root=p.isAbsolute(r)?r:process.cwd();import(require('node:url').pathToFileURL(p.join(root,'scripts','agy-mcp.mjs')).href).catch(function(e){console.error(e);process.exit(1)})"
+      ],
+      "cwd": ".",
+      "env": {
+        "AGY_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
+    }
+  }
+}

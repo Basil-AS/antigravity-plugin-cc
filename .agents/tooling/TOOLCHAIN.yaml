@@ -1,0 +1,58 @@
+schema_version: 1
+profile: balanced
+
+canonical_state:
+  project_memory: .agents
+  external_cache: .agent-cache
+  facts: [git, tests, ci, pull_request]
+
+context_budget:
+  max_primary_process_skills: 1
+  max_initial_skill_bodies: 3
+  mcp_policy: deferred_or_lean
+  retrieval: progressive
+
+integrations:
+  rtk:
+    source: https://github.com/rtk-ai/rtk
+    policy: prefer_if_installed
+    install_requires_approval: true
+    telemetry_default: disabled
+    exact_evidence: raw_or_proxy
+
+  superpowers:
+    source: https://github.com/obra/superpowers
+    policy: selected_skills
+    install_requires_approval: true
+    lifecycle_owner: universal_agent_protocol
+    telemetry_default: disabled
+
+  gortex:
+    source: https://github.com/zzet/gortex
+    policy: trigger_based
+    preferred_mode: cli_first
+    mcp_preset: lean
+    install_requires_approval: true
+    strong_triggers:
+      - large_or_unfamiliar_repository
+      - call_graph_or_dataflow
+      - blast_radius_or_cross_repo_contracts
+      - repeated_broad_source_reads
+
+  ponytail:
+    source: https://github.com/DietrichGebert/ponytail
+    policy: built_in_lite
+    plugin_optional: true
+    ultra_requires_explicit_request: true
+
+  caveman:
+    source: https://github.com/JuliusBrussee/caveman
+    policy: optional
+    default: off
+    allowed_default_use: routine_progress_updates
+
+security:
+  run_remote_installer_from_head: false
+  pin_vendor_ref_and_checksum: true
+  review_hooks_and_manifests: true
+  global_configuration_requires_approval: true

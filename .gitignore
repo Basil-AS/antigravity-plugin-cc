@@ -1,0 +1,54 @@
+# Dependencies & Package Managers
+node_modules/
+
+# Logs & Diagnostics
+*.log
+
+# Claude & Antigravity Runtime Data
+.claude/
+.antigravity/
+
+# Temporary & Cache Files
+*.tmp
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python Runtimes & Caches
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Backups & Archives
+.local-backups/
+codex_history/
+*.tar.gz
+*.tar
+*.zip
+*.iso
+*.bin
+*.img
+
+# Local Code Intelligence & Universal Agent Kit
+.serena/
+AGENT.local.md
+.agent-cache/
+*.agent-local.*
+.agents/runtime/
+.agents/tmp/
+
+# BEGIN UNIVERSAL AGENT KIT
+AGENT.local.md
+.agent-cache/
+*.agent-local.*
+.agents/runtime/
+.agents/tmp/
+# END UNIVERSAL AGENT KIT

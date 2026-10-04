@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "updated_at": null,
+  "tools": {},
+  "note": "Populate only after reviewing and pinning an exact release/tag/commit and relevant checksums."
+}

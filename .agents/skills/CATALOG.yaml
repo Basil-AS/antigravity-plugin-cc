@@ -1,0 +1,60 @@
+schema_version: 1
+
+# BEGIN AUTO-GENERATED LOCAL SKILLS
+local_skills:
+  - name: cold-start-resume
+    description: Use when starting or resuming work in a repository with unknown or potentially stale agent context.
+    source: local
+    trust: project-reviewed
+    status: enabled
+    category: process
+    path: .agents/skills/cold-start-resume/SKILL.md
+  - name: safe-external-fetch
+    description: Use when an agent needs to download documentation, archives, tools, logs, datasets or other reusable external files.
+    source: local
+    trust: project-reviewed
+    status: enabled
+    category: tool
+    path: .agents/skills/safe-external-fetch/SKILL.md
+  - name: task-handoff
+    description: Use when pausing, completing, transferring or recovering an in-progress task across agents or sessions.
+    source: local
+    trust: project-reviewed
+    status: enabled
+    category: process
+    path: .agents/skills/task-handoff/SKILL.md
+  - name: toolchain-routing
+    description: Use when deciding whether RTK, Superpowers, Gortex, Ponytail or Caveman should be activated for the current task.
+    source: local
+    trust: project-reviewed
+    status: enabled
+    category: process
+    path: .agents/skills/toolchain-routing/SKILL.md
+# END AUTO-GENERATED LOCAL SKILLS
+
+external_candidates:
+  - name: superpowers
+    source: https://github.com/obra/superpowers
+    trust: unreviewed
+    status: available_not_installed
+    policy: install_and_pin_only_with_approval
+  - name: rtk
+    source: https://github.com/rtk-ai/rtk
+    trust: unreviewed
+    status: available_not_installed
+    policy: install_and_pin_only_with_approval
+  - name: gortex
+    source: https://github.com/zzet/gortex
+    trust: unreviewed
+    status: available_not_installed
+    policy: trigger_based_install_with_approval
+  - name: ponytail
+    source: https://github.com/DietrichGebert/ponytail
+    trust: unreviewed
+    status: optional
+    policy: built_in_lite_without_plugin
+  - name: caveman
+    source: https://github.com/JuliusBrussee/caveman
+    trust: unreviewed
+    status: optional
+    policy: off_by_default

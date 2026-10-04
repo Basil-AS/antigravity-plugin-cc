@@ -1,0 +1,8 @@
+{
+  "name": "antigravity",
+  "version": "1.0.0",
+  "description": "Delegate tasks and run code reviews with Google Antigravity CLI (agy / Gemini) from Claude Code.",
+  "author": {
+    "name": "Google Antigravity"
+  }
+}
