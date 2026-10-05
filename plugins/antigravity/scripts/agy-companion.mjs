@@ -19,10 +19,11 @@ import {
 import { acquireJobSlot } from "./lib/job-slots.mjs";
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "./lib/prompts.mjs";
-import { probeAgyUsage, selectGeminiModel } from "./lib/quota.mjs";
+import { probeAgyUsage, resolveTaskModel, selectGeminiModel } from "./lib/quota.mjs";
 import {
   buildSingleJobSnapshot,
   buildStatusSnapshot,
+  findLastTaskConversation,
   readStoredJob,
   resolveCancelableJob,
   resolveResultJob
@@ -145,7 +146,7 @@ function spawnDetachedTaskWorker(cwd, jobId) {
 async function handleTask(argv) {
   const { options, positionals } = parseArgs(argv, {
     valueOptions: ["model", "effort", "cwd", "prompt-file"],
-    booleanOptions: ["json", "write", "background", "resume-last", "dry-run"],
+    booleanOptions: ["json", "write", "background", "wait", "resume-last", "dry-run"],
     aliasMap: { m: "model" }
   });
 
@@ -157,11 +158,21 @@ async function handleTask(argv) {
     throw new Error("Provide a prompt, a prompt file, piped stdin, or use --resume-last.");
   }
 
-  // Prepend proactive constraints to prevent passive waiting
-  const constraints = loadSystemConstraints();
-  const fullPrompt = constraints ? `${constraints}\n\nTask:\n${userPrompt}` : userPrompt;
+  let resume = null;
+  if (options["resume-last"]) {
+    resume = findLastTaskConversation(cwd);
+    if (!resume) {
+      throw new Error("No previous Antigravity task conversation found in this workspace to resume.");
+    }
+  }
 
-  const modelSelection = selectGeminiModel(options.model);
+  // A resumed conversation already carries the system constraints.
+  const constraints = resume ? "" : loadSystemConstraints();
+  const taskText = userPrompt || "Continue the previous task from where you left off.";
+  const fullPrompt = constraints ? `${constraints}\n\nTask:\n${taskText}` : taskText;
+  const resumeThreadId = resume?.threadId ?? null;
+
+  const modelSelection = resolveTaskModel({ model: options.model, effort: options.effort });
 
   if (options["dry-run"]) {
     const quota = probeAgyUsage({ cwd });
@@ -171,6 +182,8 @@ async function handleTask(argv) {
       model: modelSelection.model,
       write: Boolean(options.write),
       background: Boolean(options.background),
+      effort: options.effort || null,
+      resumeThreadId,
       promptChars: fullPrompt.length,
       quota
     };
@@ -179,6 +192,7 @@ async function handleTask(argv) {
       `- Model: ${modelSelection.model}`,
       `- Write mode: ${Boolean(options.write)}`,
       `- Background: ${Boolean(options.background)}`,
+      `- Resume: ${resume ? `${resume.threadId} (from ${resume.jobId})` : "no"}`,
       `- Prompt length: ${fullPrompt.length} characters`,
       `- Gemini Quota: ${quota?.gemini?.available ? `${quota.gemini.percentRemaining}%` : "unknown"}`
     ].join("\n");
@@ -193,8 +207,8 @@ async function handleTask(argv) {
     prefix: "task",
     kind: "task",
     jobClass: "task",
-    title: userPrompt.slice(0, 60).replace(/\r?\n/g, " ") || "Antigravity Task",
-    summary: userPrompt.slice(0, 120),
+    title: taskText.slice(0, 60).replace(/\r?\n/g, " ") || "Antigravity Task",
+    summary: taskText.slice(0, 120),
     workspaceRoot,
     write: Boolean(options.write),
     model: modelSelection.model,
@@ -218,6 +232,7 @@ async function handleTask(argv) {
         write: Boolean(options.write),
         model: modelSelection.model,
         effort: options.effort || null,
+        resumeThreadId,
         jobId
       }
     };
@@ -255,7 +270,7 @@ async function handleTask(argv) {
         cwd,
         write: Boolean(options.write),
         model: modelSelection.model,
-        effort: options.effort || null,
+        resumeThreadId,
         onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
       });
 
@@ -312,7 +327,7 @@ async function handleTaskWorker(argv) {
           cwd: request.cwd,
           write: request.write,
           model: request.model,
-          effort: request.effort,
+          resumeThreadId: request.resumeThreadId ?? null,
           onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
         });
 
@@ -692,7 +707,7 @@ async function main() {
         "",
         "Usage:",
         "  node agy-companion.mjs setup [--json]",
-        "  node agy-companion.mjs task [--background] [--write] [--model <model>] [prompt]",
+        "  node agy-companion.mjs task [--background|--wait] [--write] [--model <model>] [--effort low|medium|high] [--prompt-file <path>] [--resume-last] [--dry-run] [prompt]",
         "  node agy-companion.mjs task-worker --cwd <cwd> --job-id <id>",
         "  node agy-companion.mjs review [--base <ref>] [--scope <scope>] [focus]",
         "  node agy-companion.mjs review-worker --cwd <cwd> --job-id <id>",

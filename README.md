@@ -88,7 +88,7 @@ This checks your Node, Git, `agy` binary, Google authentication status, and Gemi
 | Command | Syntax | Description |
 | :--- | :--- | :--- |
 | **`/agy:setup`** | `/agy:setup [--enable-review-gate \| --disable-review-gate]` | Verifies environment readiness, auth, and quota balance. |
-| **`/agy:rescue`** | `/agy:rescue [--write] [--background] [--model <name>] <prompt>` | Delegate a task to Antigravity CLI. Use `--write` to permit file edits or `--background` for async execution. |
+| **`/agy:rescue`** | `/agy:rescue [--write] [--background\|--wait] [--model <name>] [--effort low\|medium\|high] [--prompt-file <path>] [--resume-last] [--dry-run] <prompt>` | Delegate a task to Antigravity CLI. `--write` permits file edits, `--background` runs async, `--effort` picks `gemini-3.8-flash-<effort>` (ignored with `--model`), `--prompt-file` reads the task from a file, `--resume-last` continues the latest task conversation, `--dry-run` previews without calling Gemini. |
 | **`/agy:review`** | `/agy:review [--base <ref>] [--dry-run] [--background] [focus]` | Run an objective, schema-validated code review in an isolated shadow worktree. |
 | **`/agy:status`** | `/agy:status [job-id] [--all]` | Inspect in-progress and recent background tasks and reviews. |
 | **`/agy:result`** | `/agy:result [job-id]` | Retrieve the full formatted output or structured findings of a completed job. |
@@ -106,12 +106,18 @@ This checks your Node, Git, `agy` binary, Google authentication status, and Gemi
 /agy:rescue --write --background "Add comprehensive unit tests for lib/tokenizer.mjs"
 ```
 
-#### 3. Isolated Code Review with Custom Focus
+#### 3. Long Task From a File, Higher Effort, Then a Follow-up
+```bash
+/agy:rescue --write --effort high --prompt-file docs/tasks/migrate-dto.md
+/agy:rescue --write --resume-last "Now also update the mappers' unit tests"
+```
+
+#### 4. Isolated Code Review with Custom Focus
 ```bash
 /agy:review --base main "Focus on edge cases, memory leaks, and input sanitization"
 ```
 
-#### 4. Instant Dry Run Preview
+#### 5. Instant Dry Run Preview
 ```bash
 /agy:review --dry-run
 ```
@@ -122,7 +128,7 @@ This checks your Node, Git, `agy` binary, Google authentication status, and Gemi
 
 When Claude Code is reasoning on complex tasks, it can invoke Antigravity tools directly through the local Model Context Protocol (MCP) server defined in `plugins/antigravity/.mcp.json`:
 
-- **`agy_rescue`**: Autonomous worker execution (`prompt`, `write`, `background`, `model`).
+- **`agy_rescue`**: Autonomous worker execution (`prompt`, `write`, `background`, `model`, `effort`, `resume_last`).
 - **`agy_review`**: Read-only diff review against a base branch or working tree.
 - **`agy_status`**: Poll active jobs and background progress.
 - **`agy_result`**: Fetch results upon completion.

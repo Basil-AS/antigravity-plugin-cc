@@ -73,8 +73,24 @@ export function probeAgyUsage(options = {}) {
   };
 }
 
+export const DEFAULT_GEMINI_FAMILY = "gemini-3.8-flash";
+export const GEMINI_EFFORT_LEVELS = ["low", "medium", "high"];
+
+// agy encodes reasoning effort in the model id (gemini-3.8-flash-high), so a
+// separate --effort flag is ignored once --model is passed. Map effort onto the
+// default family instead; an explicit --model always wins.
+export function resolveTaskModel({ model = null, effort = null } = {}) {
+  if (effort && !GEMINI_EFFORT_LEVELS.includes(effort)) {
+    throw new Error(`Invalid --effort "${effort}". Use one of: ${GEMINI_EFFORT_LEVELS.join(", ")}.`);
+  }
+  if (model) {
+    return selectGeminiModel(model);
+  }
+  return selectGeminiModel(effort ? `${DEFAULT_GEMINI_FAMILY}-${effort}` : null);
+}
+
 export function selectGeminiModel(requestedModel = null, quotaInfo = null) {
-  const fallbackDefault = "gemini-3.8-flash-medium";
+  const fallbackDefault = `${DEFAULT_GEMINI_FAMILY}-medium`;
   const model = requestedModel || fallbackDefault;
 
   // Verify that the requested model is in Gemini line
