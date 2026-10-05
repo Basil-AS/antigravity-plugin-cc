@@ -61,6 +61,11 @@ export function detectDefaultBranch(cwd) {
     }
   }
 
+  const hasHead = git(cwd, ["rev-parse", "-q", "--verify", "HEAD"]).status === 0;
+  if (hasHead) {
+    return "HEAD";
+  }
+
   return "main";
 }
 
@@ -131,6 +136,15 @@ export function resolveReviewTarget(cwd, options = {}) {
   }
 
   const detectedBase = detectDefaultBranch(cwd);
+  const baseExists = git(cwd, ["rev-parse", "-q", "--verify", detectedBase]).status === 0;
+  if (!baseExists) {
+    return {
+      mode: "working-tree",
+      label: "working tree diff",
+      explicit: false
+    };
+  }
+
   return {
     mode: "branch",
     label: `branch diff against ${detectedBase}`,
@@ -226,11 +240,15 @@ export function collectReviewContext(cwd, target, options = {}) {
 
   // Branch diff
   const baseRef = target.baseRef;
-  const mergeBase = gitChecked(cwd, ["merge-base", "HEAD", baseRef]).stdout.trim();
-  const commitLog = gitChecked(cwd, ["log", "--oneline", `${mergeBase}..HEAD`]).stdout.trim();
-  const rawDiff = gitChecked(cwd, ["diff", "--binary", "--no-ext-diff", `${baseRef}...HEAD`]).stdout;
+  const mergeBaseRes = git(cwd, ["merge-base", "HEAD", baseRef]);
+  const mergeBase = mergeBaseRes.status === 0 ? mergeBaseRes.stdout.trim() : (git(cwd, ["rev-parse", "HEAD"]).stdout.trim() || "HEAD");
+  const commitLogRes = git(cwd, ["log", "--oneline", `${mergeBase}..HEAD`]);
+  const commitLog = commitLogRes.status === 0 ? commitLogRes.stdout.trim() : "";
+  const rawDiffRes = git(cwd, ["diff", "--binary", "--no-ext-diff", `${baseRef}...HEAD`]);
+  const rawDiff = rawDiffRes.status === 0 ? rawDiffRes.stdout : (git(cwd, ["diff", "--binary", "--no-ext-diff", "HEAD~1...HEAD"]).stdout || "");
   const diffText = sanitizeDiffText(rawDiff);
-  const nameOnly = gitChecked(cwd, ["diff", "--name-only", `${baseRef}...HEAD`]).stdout.trim();
+  const nameOnlyRes = git(cwd, ["diff", "--name-only", `${baseRef}...HEAD`]);
+  const nameOnly = nameOnlyRes.status === 0 ? nameOnlyRes.stdout.trim() : "";
   const changedFiles = nameOnly.split("\n").filter(Boolean);
 
   return {
