@@ -6,7 +6,14 @@ import process from "node:process";
 
 import { createAgyStreamReader } from "./agy-stream.mjs";
 import { binaryAvailable, terminateProcessTree } from "./process.mjs";
-import { selectGeminiModel } from "./quota.mjs";
+import {
+  assessGeminiQuota,
+  ensureGeminiQuota,
+  getQuotaSnapshot,
+  isQuotaErrorText,
+  quotaErrorFromAssessment,
+  selectGeminiModel
+} from "./quota.mjs";
 
 export const DEFAULT_PRINT_TIMEOUT_SECONDS = 720;
 export const DEFAULT_TURN_TIMEOUT_MS = 780 * 1000;
@@ -266,3 +273,36 @@ export async function runAgyTurn(options = {}) {
 
   return executionPromise;
 }
+
+function quotaErrorAfterFailure(cwd, detailText) {
+  const quota = getQuotaSnapshot({ cwd, fresh: true });
+  const firstLine = String(detailText ?? "").trim().split(/\r?\n/)[0].slice(0, 200);
+  return quotaErrorFromAssessment(assessGeminiQuota(quota), firstLine ? `agy said: ${firstLine}` : null);
+}
+
+// runAgyTurn plus the Gemini quota guard: refuse (or wait up to
+// guard.maxWaitMs for the reset) before starting, and turn agy's own
+// quota/rate-limit failures into an AgyQuotaError with the reset time.
+export async function runAgyTurnWithQuota(options = {}, guard = {}) {
+  await ensureGeminiQuota({ cwd: options.cwd, maxWaitMs: guard.maxWaitMs ?? 0, onWait: guard.onWait });
+
+  let result;
+  try {
+    result = await runAgyTurn(options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isQuotaErrorText(message)) {
+      throw quotaErrorAfterFailure(options.cwd, message);
+    }
+    throw error;
+  }
+
+  if (result.status !== "SUCCESS") {
+    const text = `${result.stderr ?? ""}\n${result.response ?? ""}`;
+    if (isQuotaErrorText(text)) {
+      throw quotaErrorAfterFailure(options.cwd, text);
+    }
+  }
+  return result;
+}
+

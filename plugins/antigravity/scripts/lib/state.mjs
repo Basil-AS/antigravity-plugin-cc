@@ -20,6 +20,11 @@ function resolvePluginDataDir() {
   return null;
 }
 
+// Account-wide (not per-workspace) data root, e.g. for the agy quota cache.
+export function resolveCompanionDataRoot() {
+  return resolvePluginDataDir() ?? FALLBACK_STATE_ROOT_DIR;
+}
+
 export function resolveStateDir(cwd = process.cwd()) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   let canonicalWorkspaceRoot = workspaceRoot;

@@ -60,11 +60,13 @@ export function renderSetupReport(setupData) {
 
   if (setupData.quota && setupData.quota.available) {
     lines.push("", "## Quota Pools");
-    if (setupData.quota.gemini.percent !== null) {
-      lines.push(`- **Gemini Pool:** ${setupData.quota.gemini.percent}% remaining ${setupData.quota.gemini.reset ? `(resets ${setupData.quota.gemini.reset})` : ""}`);
-    }
-    if (setupData.quota.claude.percent !== null) {
-      lines.push(`- **Claude/GPT Pool:** ${setupData.quota.claude.percent}% remaining ${setupData.quota.claude.reset ? `(resets ${setupData.quota.claude.reset})` : ""}`);
+    for (const [label, pool] of [["Gemini Pool", setupData.quota.gemini], ["Claude/GPT Pool", setupData.quota.claude]]) {
+      if (!pool || pool.percent === null) continue;
+      const windows = (pool.windows ?? []).length > 0 ? pool.windows : [{ window: pool.window || "limit", percent: pool.percent, reset: pool.reset }];
+      const detail = windows
+        .map((w) => `${w.window} ${w.percent}%${w.reset ? ` (resets ${w.reset})` : ""}`)
+        .join(", ");
+      lines.push(`- **${label}:** ${pool.percent}% usable — ${detail}`);
     }
   }
 

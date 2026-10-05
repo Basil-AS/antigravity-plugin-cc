@@ -7,7 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { normalizeArgv, parseArgs } from "./lib/args.mjs";
-import { getAgyAvailability, getAgyAuthStatus, runAgyTurn } from "./lib/agy.mjs";
+import { getAgyAvailability, getAgyAuthStatus, runAgyTurnWithQuota } from "./lib/agy.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import {
   collectReviewContext,
@@ -19,7 +19,18 @@ import {
 import { acquireJobSlot } from "./lib/job-slots.mjs";
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "./lib/prompts.mjs";
-import { probeAgyUsage, resolveTaskModel, selectGeminiModel } from "./lib/quota.mjs";
+import {
+  QUOTA_ERROR_CODE,
+  QUOTA_EXIT_CODE,
+  assessGeminiQuota,
+  formatDuration,
+  getQuotaSnapshot,
+  parseDuration,
+  probeAgyUsage,
+  quotaErrorFromAssessment,
+  resolveTaskModel,
+  selectGeminiModel
+} from "./lib/quota.mjs";
 import {
   buildSingleJobSnapshot,
   buildStatusSnapshot,
@@ -71,6 +82,30 @@ function outputResult(value, asJson) {
 
 function outputCommandResult(payload, rendered, asJson) {
   outputResult(asJson ? payload : rendered, asJson);
+}
+
+function readQuotaWaitMs(options) {
+  return options["wait-for-quota"] ? parseDuration(options["wait-for-quota"]) : 0;
+}
+
+// Launcher-side check so a background job is not queued against an exhausted
+// pool; the job itself still re-checks (and may wait) right before agy runs.
+function assertQuotaForLaunch(cwd, maxWaitMs) {
+  const assessment = assessGeminiQuota(getQuotaSnapshot({ cwd }));
+  if (assessment.exhausted && !(assessment.waitMs !== null && assessment.waitMs <= maxWaitMs)) {
+    throw quotaErrorFromAssessment(assessment);
+  }
+  return assessment;
+}
+
+function describeQuota(assessment) {
+  if (!assessment?.known) return "unknown";
+  const reset = assessment.resetAt ? `, resets ${assessment.resetAt} (in ${formatDuration(assessment.waitMs)})` : "";
+  return `${assessment.percent}% (${assessment.window} limit${reset})${assessment.exhausted ? " — EXHAUSTED" : ""}`;
+}
+
+function quotaWaitReporter(progress) {
+  return (a) => progress({ message: `Waiting for Gemini quota reset at ${a.resetAt} (in ${formatDuration(a.waitMs)})...` });
 }
 
 function readTaskPrompt(cwd, options, positionals) {
@@ -145,7 +180,7 @@ function spawnDetachedTaskWorker(cwd, jobId) {
 
 async function handleTask(argv) {
   const { options, positionals } = parseArgs(argv, {
-    valueOptions: ["model", "effort", "cwd", "prompt-file"],
+    valueOptions: ["model", "effort", "cwd", "prompt-file", "wait-for-quota"],
     booleanOptions: ["json", "write", "background", "wait", "resume-last", "dry-run"],
     aliasMap: { m: "model" }
   });
@@ -175,7 +210,8 @@ async function handleTask(argv) {
   const modelSelection = resolveTaskModel({ model: options.model, effort: options.effort });
 
   if (options["dry-run"]) {
-    const quota = probeAgyUsage({ cwd });
+    const quota = getQuotaSnapshot({ cwd });
+    const quotaAssessment = assessGeminiQuota(quota);
     const dryRunPayload = {
       dryRun: true,
       command: "task",
@@ -185,7 +221,8 @@ async function handleTask(argv) {
       effort: options.effort || null,
       resumeThreadId,
       promptChars: fullPrompt.length,
-      quota
+      quota,
+      quotaAssessment
     };
     const rendered = [
       "# Antigravity Task (Dry Run)",
@@ -194,11 +231,14 @@ async function handleTask(argv) {
       `- Background: ${Boolean(options.background)}`,
       `- Resume: ${resume ? `${resume.threadId} (from ${resume.jobId})` : "no"}`,
       `- Prompt length: ${fullPrompt.length} characters`,
-      `- Gemini Quota: ${quota?.gemini?.available ? `${quota.gemini.percentRemaining}%` : "unknown"}`
+      `- Gemini Quota: ${describeQuota(quotaAssessment)}`
     ].join("\n");
     outputCommandResult(dryRunPayload, rendered, options.json);
     return;
   }
+
+  const quotaWaitMs = readQuotaWaitMs(options);
+  assertQuotaForLaunch(cwd, quotaWaitMs);
 
   const jobId = generateJobId("task");
 
@@ -233,6 +273,7 @@ async function handleTask(argv) {
         model: modelSelection.model,
         effort: options.effort || null,
         resumeThreadId,
+        quotaWaitMs,
         jobId
       }
     };
@@ -265,14 +306,14 @@ async function handleTask(argv) {
     { ...jobRecord, logFile },
     async () => {
       progress({ message: `Starting task on ${modelSelection.model}...` });
-      const result = await runAgyTurn({
+      const result = await runAgyTurnWithQuota({
         prompt: fullPrompt,
         cwd,
         write: Boolean(options.write),
         model: modelSelection.model,
         resumeThreadId,
         onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
-      });
+      }, { maxWaitMs: quotaWaitMs, onWait: quotaWaitReporter(progress) });
 
       return {
         exitStatus: result.status === "SUCCESS" ? 0 : 1,
@@ -322,14 +363,14 @@ async function handleTaskWorker(argv) {
       { ...storedJob, logFile },
       async () => {
         progress({ message: `Worker executing task on ${request.model || "Gemini"}...` });
-        const result = await runAgyTurn({
+        const result = await runAgyTurnWithQuota({
           prompt: request.prompt,
           cwd: request.cwd,
           write: request.write,
           model: request.model,
           resumeThreadId: request.resumeThreadId ?? null,
           onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
-        });
+        }, { maxWaitMs: request.quotaWaitMs ?? 0, onWait: quotaWaitReporter(progress) });
 
         return {
           exitStatus: result.status === "SUCCESS" ? 0 : 1,
@@ -402,7 +443,7 @@ async function handleReviewWorker(argv) {
       { ...storedJob, logFile },
       async () => {
         progress({ message: `Review worker running on ${request.model || "Gemini"}...` });
-        const result = await runAgyTurn({
+        const result = await runAgyTurnWithQuota({
           prompt,
           cwd: shadow.worktreePath,
           sandbox: true,
@@ -410,7 +451,7 @@ async function handleReviewWorker(argv) {
           model: request.model,
           jsonSchema: schemaContent,
           onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
-        });
+        }, { maxWaitMs: request.quotaWaitMs ?? 0, onWait: quotaWaitReporter(progress) });
 
         let parsedData = null;
         let validation = { valid: false, errors: [] };
@@ -453,7 +494,7 @@ async function handleReviewWorker(argv) {
 
 async function handleReview(argv) {
   const { options, positionals } = parseArgs(argv, {
-    valueOptions: ["base", "scope", "model", "cwd"],
+    valueOptions: ["base", "scope", "model", "cwd", "wait-for-quota"],
     booleanOptions: ["json", "background", "wait", "dry-run"],
     aliasMap: { m: "model" }
   });
@@ -471,7 +512,8 @@ async function handleReview(argv) {
   const modelSelection = selectGeminiModel(options.model);
 
   if (options["dry-run"]) {
-    const quota = probeAgyUsage({ cwd });
+    const quota = getQuotaSnapshot({ cwd });
+    const quotaAssessment = assessGeminiQuota(quota);
     const reviewContext = collectReviewContext(cwd, target);
     const dryRunPayload = {
       dryRun: true,
@@ -480,7 +522,8 @@ async function handleReview(argv) {
       changedFiles: reviewContext.changedFiles,
       summary: reviewContext.summary,
       model: modelSelection.model,
-      quota
+      quota,
+      quotaAssessment
     };
     const rendered = [
       "# Antigravity Review (Dry Run)",
@@ -488,11 +531,14 @@ async function handleReview(argv) {
       `- Changed files: ${reviewContext.changedFiles.length}`,
       `- Summary: ${reviewContext.summary}`,
       `- Model: ${modelSelection.model}`,
-      `- Gemini Quota: ${quota?.gemini?.available ? `${quota.gemini.percentRemaining}%` : "unknown"}`
+      `- Gemini Quota: ${describeQuota(quotaAssessment)}`
     ].join("\n");
     outputCommandResult(dryRunPayload, rendered, options.json);
     return;
   }
+
+  const quotaWaitMs = readQuotaWaitMs(options);
+  assertQuotaForLaunch(cwd, quotaWaitMs);
 
   const jobId = generateJobId("review");
   const jobMetadata = {
@@ -523,6 +569,7 @@ async function handleReview(argv) {
         target,
         focusText,
         model: modelSelection.model,
+        quotaWaitMs,
         jobId
       }
     };
@@ -571,7 +618,7 @@ async function handleReview(argv) {
       { ...jobRecord, logFile },
       async () => {
         progress({ message: "Running review turn in isolated worktree..." });
-        const result = await runAgyTurn({
+        const result = await runAgyTurnWithQuota({
           prompt,
           cwd: shadow.worktreePath,
           sandbox: true,
@@ -579,7 +626,7 @@ async function handleReview(argv) {
           model: modelSelection.model,
           jsonSchema: schemaContent,
           onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
-        });
+        }, { maxWaitMs: quotaWaitMs, onWait: quotaWaitReporter(progress) });
 
         let parsedData = null;
         let validation = { valid: false, errors: [] };
@@ -707,9 +754,9 @@ async function main() {
         "",
         "Usage:",
         "  node agy-companion.mjs setup [--json]",
-        "  node agy-companion.mjs task [--background|--wait] [--write] [--model <model>] [--effort low|medium|high] [--prompt-file <path>] [--resume-last] [--dry-run] [prompt]",
+        "  node agy-companion.mjs task [--background|--wait] [--write] [--model <model>] [--effort low|medium|high] [--prompt-file <path>] [--resume-last] [--wait-for-quota <15m>] [--dry-run] [prompt]",
         "  node agy-companion.mjs task-worker --cwd <cwd> --job-id <id>",
-        "  node agy-companion.mjs review [--base <ref>] [--scope <scope>] [focus]",
+        "  node agy-companion.mjs review [--base <ref>] [--scope <scope>] [--wait-for-quota <15m>] [focus]",
         "  node agy-companion.mjs review-worker --cwd <cwd> --job-id <id>",
         "  node agy-companion.mjs status [job-id] [--all] [--json]",
         "  node agy-companion.mjs result [job-id] [--json]",
@@ -751,6 +798,14 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (err?.code === QUOTA_ERROR_CODE) {
+    if (process.argv.includes("--json")) {
+      console.log(JSON.stringify(err.toJSON(), null, 2));
+    } else {
+      console.error(`Error: ${err.message}`);
+    }
+    process.exit(QUOTA_EXIT_CODE);
+  }
   console.error(`Error: ${err.message}`);
   process.exit(1);
 });

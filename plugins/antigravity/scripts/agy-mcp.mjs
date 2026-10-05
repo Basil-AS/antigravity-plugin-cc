@@ -60,7 +60,8 @@ export const TOOLS = [
       background: { type: "boolean", default: false, description: "Run task in the background" },
       model: { type: "string", description: "Optional Gemini model (defaults to gemini-3.8-flash-medium)" },
       effort: { type: "string", enum: ["low", "medium", "high"], description: "Reasoning effort; selects gemini-3.8-flash-<effort> unless model is set" },
-      resume_last: { type: "boolean", default: false, description: "Continue the latest Antigravity task conversation in this workspace" }
+      resume_last: { type: "boolean", default: false, description: "Continue the latest Antigravity task conversation in this workspace" },
+      wait_for_quota: { type: "string", description: "If the Gemini quota is exhausted but resets within this duration (e.g. 15m), wait instead of failing" }
     }
   ),
   tool(
@@ -72,7 +73,8 @@ export const TOOLS = [
     {
       workspace: { type: "string", description: "Target repository directory" },
       base: { type: "string", description: "Git base reference to compare against (e.g. main)" },
-      focus: { type: "string", description: "Specific aspects to focus on (e.g. security, performance)" }
+      focus: { type: "string", description: "Specific aspects to focus on (e.g. security, performance)" },
+      wait_for_quota: { type: "string", description: "If the Gemini quota is exhausted but resets within this duration (e.g. 15m), wait instead of failing" }
     }
   ),
   tool(
@@ -121,6 +123,7 @@ async function handleToolCall(name, args) {
       if (args.model) cliArgs.push("--model", args.model);
       if (args.effort) cliArgs.push("--effort", args.effort);
       if (args.resume_last) cliArgs.push("--resume-last");
+      if (args.wait_for_quota) cliArgs.push("--wait-for-quota", args.wait_for_quota);
       cliArgs.push("--cwd", cwd, args.prompt);
 
       return await runCliAsync(cliArgs, { cwd });
@@ -128,6 +131,7 @@ async function handleToolCall(name, args) {
     case "agy_review": {
       const cliArgs = [SCRIPT_PATH, "review", "--json", "--cwd", cwd];
       if (args.base) cliArgs.push("--base", args.base);
+      if (args.wait_for_quota) cliArgs.push("--wait-for-quota", args.wait_for_quota);
       if (args.focus) cliArgs.push(args.focus);
 
       return await runCliAsync(cliArgs, { cwd });
@@ -201,15 +205,20 @@ async function main() {
       try {
         const output = await handleToolCall(params.name, params.arguments || {});
         let contentText = output;
+        let quotaExhausted = false;
         try {
           const parsed = JSON.parse(output);
           contentText = JSON.stringify(parsed, null, 2);
+          quotaExhausted = parsed?.quotaExhausted === true;
         } catch {}
 
         const response = {
           jsonrpc: "2.0",
           id,
           result: {
+            // An exhausted Gemini pool is a tool error the caller should act on
+            // (do the work itself or wait for resetAt), not a normal result.
+            ...(quotaExhausted ? { isError: true } : {}),
             content: [{ type: "text", text: contentText }]
           }
         };

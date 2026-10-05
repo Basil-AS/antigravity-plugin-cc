@@ -20,9 +20,11 @@ Forwarding rules:
      `--model <gemini-model>`, `--effort low|medium|high` (picks gemini-3.8-flash-<effort>; ignored when `--model` is set),
      `--prompt-file <path>` (long task text read from a file; then omit `[TASK_TEXT]` unless adding a short note),
      `--resume-last` (continue the latest Antigravity task conversation in this workspace; `[TASK_TEXT]` may be a follow-up or omitted),
-     `--dry-run` (preview model, mode and prompt size without calling Gemini), `--wait` (foreground; the default).
+     `--dry-run` (preview model, mode, prompt size and Gemini quota without calling Gemini), `--wait` (foreground; the default),
+     `--wait-for-quota <duration>` (e.g. `15m`: if the Gemini pool is exhausted but resets within that time, wait for it instead of failing).
    - Do NOT include `--write` or `--background` inside the `[TASK_TEXT]`.
 3. Prompt shaping:
    - Formulate a clear, self-contained task for Gemini with explicit file paths and expected outcomes.
    - Escape double quotes inside the prompt string properly.
 4. Return the stdout of `agy-companion.mjs` verbatim to the user without wrapping commentary.
+5. Exit code 75 / `Antigravity Gemini quota exhausted` means the Gemini pool is used up: return that message (it names the reset time) and do not retry.
