@@ -13,6 +13,17 @@ const execFileAsync = promisify(execFile);
 const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SCRIPT_PATH = path.join(ROOT_DIR, "scripts", "agy-companion.mjs");
 
+export function readPluginVersion(rootDir = ROOT_DIR) {
+  try {
+    const manifest = JSON.parse(readFileSync(path.join(rootDir, ".claude-plugin", "plugin.json"), "utf8"));
+    return typeof manifest.version === "string" && manifest.version ? manifest.version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+const SERVER_VERSION = readPluginVersion();
+
 async function runCliAsync(args, options = {}) {
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, args, {
@@ -161,7 +172,7 @@ async function main() {
         result: {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "antigravity-mcp", version: "1.0.3" }
+          serverInfo: { name: "antigravity-mcp", version: SERVER_VERSION }
         }
       };
       process.stdout.write(JSON.stringify(response) + "\n");

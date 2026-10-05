@@ -191,8 +191,10 @@ export function renderReviewResult(parsed, options = {}) {
         ""
       );
     }
-  } else {
+  } else if (isApproved) {
     lines.push("No blocking issues or defects found.", "");
+  } else {
+    lines.push("Review flagged attention, but no structured findings were itemized.", "");
   }
 
   if (data.next_steps && data.next_steps.length > 0) {

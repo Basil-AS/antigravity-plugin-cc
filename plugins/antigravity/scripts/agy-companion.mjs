@@ -6,7 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
+import { normalizeArgv, parseArgs } from "./lib/args.mjs";
 import { getAgyAvailability, getAgyAuthStatus, runAgyTurn } from "./lib/agy.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import {
@@ -605,7 +605,7 @@ async function handleReview(argv) {
 }
 
 async function handleStatus(argv) {
-  const { options, positionals } = parseArgs(argv, {
+  const { options, positionals } = parseArgs(normalizeArgv(argv), {
     valueOptions: ["cwd"],
     booleanOptions: ["json", "all"]
   });
@@ -624,7 +624,7 @@ async function handleStatus(argv) {
 }
 
 function handleResult(argv) {
-  const { options, positionals } = parseArgs(argv, {
+  const { options, positionals } = parseArgs(normalizeArgv(argv), {
     valueOptions: ["cwd"],
     booleanOptions: ["json"]
   });
@@ -641,7 +641,7 @@ function handleResult(argv) {
 }
 
 function handleCancel(argv) {
-  const { options, positionals } = parseArgs(argv, {
+  const { options, positionals } = parseArgs(normalizeArgv(argv), {
     valueOptions: ["cwd"],
     booleanOptions: ["json"]
   });
