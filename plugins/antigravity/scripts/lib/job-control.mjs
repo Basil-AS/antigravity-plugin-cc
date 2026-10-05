@@ -32,7 +32,13 @@ export function findLastTaskConversation(cwd, options = {}) {
       typeof candidate.threadId === "string" &&
       candidate.threadId
   );
-  return job ? { jobId: job.id, threadId: job.threadId } : null;
+  if (!job) return null;
+  const isolation = job.result?.isolation;
+  const reusable =
+    isolation && isolation.mode === "worktree" && isolation.write && isolation.workPath && !isolation.appliedAt && !isolation.discardedAt
+      ? isolation
+      : null;
+  return { jobId: job.id, threadId: job.threadId, isolation: reusable };
 }
 
 function getJobTypeLabel(job) {
@@ -102,10 +108,25 @@ function formatElapsedDuration(startValue, endValue = null) {
   return `${seconds}s`;
 }
 
+// Status views must stay small: the stored request (full prompt), raw result
+// and rendered output can be tens of KB per job. /agy:result returns them.
+function compactJob(job) {
+  const { request, result, rendered, ...rest } = job;
+  const isolation = result?.isolation;
+  return {
+    ...rest,
+    taskChars: typeof request?.taskText === "string" ? request.taskText.length : undefined,
+    verifyCommands: request?.verify?.length || undefined,
+    changedFiles: isolation?.changedFiles?.length ?? undefined,
+    pendingPatch: Boolean(isolation?.patchFile && !isolation.appliedAt && !isolation.discardedAt) || undefined,
+    verificationFailed: Array.isArray(result?.verification) ? result.verification.some((v) => !v.passed) || undefined : undefined
+  };
+}
+
 export function enrichJob(job, options = {}) {
   const maxProgressLines = options.maxProgressLines ?? DEFAULT_MAX_PROGRESS_LINES;
   return {
-    ...job,
+    ...compactJob(job),
     kindLabel: getJobTypeLabel(job),
     progressPreview:
       job.status === "queued" || job.status === "running" || job.status === "failed"

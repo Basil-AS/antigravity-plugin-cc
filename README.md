@@ -88,11 +88,13 @@ This checks your Node, Git, `agy` binary, Google authentication status, and Gemi
 | Command | Syntax | Description |
 | :--- | :--- | :--- |
 | **`/agy:setup`** | `/agy:setup [--enable-review-gate \| --disable-review-gate]` | Verifies environment readiness, auth, and quota balance. |
-| **`/agy:rescue`** | `/agy:rescue [--write] [--background\|--wait] [--model <name>] [--effort low\|medium\|high] [--prompt-file <path>] [--resume-last] [--wait-for-quota <15m>] [--dry-run] <prompt>` | Delegate a task to Antigravity CLI. `--write` permits file edits, `--background` runs async, `--effort` picks `gemini-3.8-flash-<effort>` (ignored with `--model`), `--prompt-file` reads the task from a file, `--resume-last` continues the latest task conversation, `--dry-run` previews without calling Gemini. |
+| **`/agy:rescue`** | `/agy:rescue [--write [--in-place]\|--read-only] [--verify <cmd>]... [--background\|--wait] [--model <name>] [--effort low\|medium\|high] [--prompt-file <path>] [--resume-last] [--wait-for-quota <15m>] [--dry-run] <prompt>` | Delegate a task to Antigravity CLI. Read-only by default (disposable copy); `--write` edits an isolated worktree and returns a patch; `--verify` commands are run by the plugin with real output attached; `--effort` picks `gemini-3.8-flash-<effort>`; `--resume-last` continues the latest task (and its worktree). |
 | **`/agy:review`** | `/agy:review [--base <ref>] [--dry-run] [--background] [focus]` | Run an objective, schema-validated code review in an isolated shadow worktree. |
 | **`/agy:status`** | `/agy:status [job-id] [--all]` | Inspect in-progress and recent background tasks and reviews. |
 | **`/agy:result`** | `/agy:result [job-id]` | Retrieve the full formatted output or structured findings of a completed job. |
 | **`/agy:cancel`** | `/agy:cancel <job-id>` | Terminate a running background task and cascade-kill its child process tree. |
+| **`/agy:apply`** | `/agy:apply [job-id] [--keep-worktree]` | Apply the patch of a finished write task to the workspace (nothing is committed). |
+| **`/agy:discard`** | `/agy:discard [job-id]` | Drop the isolated worktree and patch of a finished write task. |
 
 ### Examples
 
@@ -124,6 +126,22 @@ This checks your Node, Git, `agy` binary, Google authentication status, and Gemi
 
 ---
 
+## 🔒 Task Isolation & Verification
+
+`agy` writes files in every mode — without `--dangerously-skip-permissions`, with `--mode plan` and with `--sandbox` alike (verified against agy directly). The plugin therefore enforces isolation itself:
+
+- **Read-only (default):** the task runs in a disposable git worktree seeded with your current state (HEAD + uncommitted + untracked files). Any edit Antigravity makes is discarded and listed as a *read-only violation*.
+- **`--write`:** the task runs in an isolated worktree; the result ends with a diff stat, the worktree path and a patch. Nothing reaches your files until you run `/agy:apply <job-id>` (or `/agy:discard <job-id>`). `--resume-last` continues in the same worktree. `--in-place` restores direct editing.
+- **Escape detection:** if your real workspace changes while a job runs (e.g. the model used an absolute path), the report says so.
+- **`--verify "<cmd>"` (repeatable):** after the turn the plugin runs each command in the isolated copy and attaches its exit code and output tail — evidence instead of the model's "tests pass". A failing check marks the job failed. The patch is captured before checks run, so build artefacts never leak into it.
+- **Evidence rules:** the system prompt requires `path:line`/command-output evidence for every conclusion, labels unproven ones as hypotheses, and forbids reporting before checks finish.
+- Ignored dependency dirs (`node_modules`, `.venv`, …) are symlinked into the copy so builds and tests work.
+- Non-git workspaces cannot be isolated; the task runs in place and the report says so.
+
+`/agy:status` is compact (no stored prompts or outputs; `phase` reflects `running` / `waiting-quota` / `verifying`). Background launches print *RESULT PENDING* — poll `/agy:status <id>` and fetch with `/agy:result <id>`.
+
+---
+
 ## ⏳ Gemini Quota Handling
 
 Antigravity meters Gemini in two windows (weekly and five-hour); all Gemini models share one pool. The companion:
@@ -142,10 +160,11 @@ The threshold defaults to 2% and can be changed with `AGY_QUOTA_MIN_PERCENT`.
 
 When Claude Code is reasoning on complex tasks, it can invoke Antigravity tools directly through the local Model Context Protocol (MCP) server defined in `plugins/antigravity/.mcp.json`:
 
-- **`agy_rescue`**: Autonomous worker execution (`prompt`, `write`, `background`, `model`, `effort`, `resume_last`, `wait_for_quota`).
+- **`agy_rescue`**: Autonomous worker execution (`prompt`, `write`, `in_place`, `verify`, `background`, `model`, `effort`, `resume_last`, `wait_for_quota`).
 - **`agy_review`**: Read-only diff review against a base branch or working tree.
 - **`agy_status`**: Poll active jobs and background progress.
 - **`agy_result`**: Fetch results upon completion.
+- **`agy_apply` / `agy_discard`**: Apply or drop the isolated changes of a finished write task.
 - **`agy_cancel`**: Abort jobs if criteria change.
 
 All MCP tool invocations are executed asynchronously with non-blocking I/O, ensuring Claude Code's stdio loop never freezes.

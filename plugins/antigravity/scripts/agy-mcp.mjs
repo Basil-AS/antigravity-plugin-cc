@@ -50,16 +50,18 @@ export const TOOLS = [
   tool(
     "agy_rescue",
     "Delegate task to Google Antigravity (Gemini)",
-    "Run a task using Google Antigravity CLI (agy / Gemini). Supports read-only analysis or code modifications with `write: true`. Can run in the background with `background: true`.",
+    "Run a task using Google Antigravity CLI (agy / Gemini). Read-only analysis by default (runs in a disposable copy; edits are discarded and reported). With `write: true` it edits an isolated git worktree and returns a patch summary; apply it with `agy_apply` after review. `verify` commands are run by the plugin itself and their real output is attached. `background: true` returns only a launch receipt (result pending) — poll `agy_status`/`agy_result`.",
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     ["prompt"],
     {
       prompt: { type: "string", description: "The task instructions for Antigravity" },
       workspace: { type: "string", description: "Target workspace directory (defaults to current working directory)" },
-      write: { type: "boolean", default: false, description: "Allow Antigravity to modify files" },
+      write: { type: "boolean", default: false, description: "Allow Antigravity to modify files (in an isolated worktree unless in_place)" },
+      in_place: { type: "boolean", default: false, description: "With write: edit the workspace directly instead of an isolated worktree" },
+      verify: { type: "array", items: { type: "string" }, description: "Shell commands the plugin runs after the task (in the isolated copy) and attaches real output for, e.g. [\"npm test\"]" },
       background: { type: "boolean", default: false, description: "Run task in the background" },
       model: { type: "string", description: "Optional Gemini model (defaults to gemini-3.8-flash-medium)" },
-      effort: { type: "string", enum: ["low", "medium", "high"], description: "Reasoning effort; selects gemini-3.8-flash-<effort> unless model is set" },
+      effort: { type: "string", enum: ["low", "medium", "high"], description: "Reasoning effort; selects gemini-3.8-flash-<effort> unless model is set. Use high for audits and root-cause analysis" },
       resume_last: { type: "boolean", default: false, description: "Continue the latest Antigravity task conversation in this workspace" },
       wait_for_quota: { type: "string", description: "If the Gemini quota is exhausted but resets within this duration (e.g. 15m), wait instead of failing" }
     }
@@ -100,6 +102,28 @@ export const TOOLS = [
     }
   ),
   tool(
+    "agy_apply",
+    "Apply Antigravity changes",
+    "Apply the isolated changes (patch) of a finished Antigravity write task to the workspace. Nothing is committed.",
+    { readOnlyHint: false, destructiveHint: false },
+    [],
+    {
+      workspace: { type: "string", description: "Target workspace directory" },
+      job_id: { type: "string", description: "Job ID (defaults to the latest finished job)" }
+    }
+  ),
+  tool(
+    "agy_discard",
+    "Discard Antigravity changes",
+    "Discard the isolated worktree and patch of a finished Antigravity write task.",
+    { readOnlyHint: false, destructiveHint: true },
+    [],
+    {
+      workspace: { type: "string", description: "Target workspace directory" },
+      job_id: { type: "string", description: "Job ID (defaults to the latest finished job)" }
+    }
+  ),
+  tool(
     "agy_cancel",
     "Cancel running Antigravity job",
     "Cancel an in-progress Antigravity background task and terminate its process tree.",
@@ -119,6 +143,10 @@ async function handleToolCall(name, args) {
     case "agy_rescue": {
       const cliArgs = [SCRIPT_PATH, "task", "--json"];
       if (args.write) cliArgs.push("--write");
+      if (args.write && args.in_place) cliArgs.push("--in-place");
+      for (const command of Array.isArray(args.verify) ? args.verify : []) {
+        if (typeof command === "string" && command.trim()) cliArgs.push("--verify", command);
+      }
       if (args.background) cliArgs.push("--background");
       if (args.model) cliArgs.push("--model", args.model);
       if (args.effort) cliArgs.push("--effort", args.effort);
@@ -144,6 +172,13 @@ async function handleToolCall(name, args) {
     }
     case "agy_result": {
       const cliArgs = [SCRIPT_PATH, "result", "--json", "--cwd", cwd];
+      if (args.job_id) cliArgs.push(args.job_id);
+
+      return await runCliAsync(cliArgs, { cwd });
+    }
+    case "agy_apply":
+    case "agy_discard": {
+      const cliArgs = [SCRIPT_PATH, name === "agy_apply" ? "apply" : "discard", "--json", "--cwd", cwd];
       if (args.job_id) cliArgs.push(args.job_id);
 
       return await runCliAsync(cliArgs, { cwd });

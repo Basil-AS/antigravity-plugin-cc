@@ -50,10 +50,19 @@ import {
 import { validateAgainstSchema } from "./lib/schema-validate.mjs";
 import {
   getConfig,
+  resolveJobFile,
   saveConfig,
   upsertJob,
   writeJobFile
 } from "./lib/state.mjs";
+import {
+  applyTaskPatch,
+  captureTreeState,
+  finalizeTaskIsolation,
+  prepareTaskIsolation,
+  removeTaskIsolation
+} from "./lib/task-isolation.mjs";
+import { renderVerifications, runVerifications } from "./lib/verify.mjs";
 import {
   appendLogLine,
   createJobLogFile,
@@ -105,7 +114,7 @@ function describeQuota(assessment) {
 }
 
 function quotaWaitReporter(progress) {
-  return (a) => progress({ message: `Waiting for Gemini quota reset at ${a.resetAt} (in ${formatDuration(a.waitMs)})...` });
+  return (a) => progress({ message: `Waiting for Gemini quota reset at ${a.resetAt} (in ${formatDuration(a.waitMs)})...`, phase: "waiting-quota" });
 }
 
 function readTaskPrompt(cwd, options, positionals) {
@@ -178,15 +187,183 @@ function spawnDetachedTaskWorker(cwd, jobId) {
   return child;
 }
 
+function buildTaskPrompt({ taskText, isolation, workspaceRoot, callerRel, write, verify, resumed }) {
+  const lines = [];
+  if (!resumed) {
+    const constraints = loadSystemConstraints();
+    if (constraints) lines.push(constraints, "");
+  }
+  const where =
+    isolation.mode === "worktree"
+      ? write
+        ? `an isolated copy of ${workspaceRoot}; your changes there are returned to the caller as a patch`
+        : `an isolated, disposable copy of ${workspaceRoot}`
+      : "the caller's workspace";
+  lines.push(`Working directory: ${isolation.workPath} (${where}).`);
+  if (callerRel) {
+    lines.push(`The caller was in the subdirectory \`${callerRel}\`; relative paths in the task are relative to the working directory root unless they only make sense from that subdirectory.`);
+  }
+  lines.push(
+    write
+      ? "Mode: WRITE. Make the requested changes directly with your file tools inside the working directory; do not just print code. When done, list the files you changed and the checks you ran with their real output."
+      : "Mode: READ-ONLY ANALYSIS. Do not create, modify or delete any files. Investigate and report findings with evidence. Any file change will be discarded and reported as a violation."
+  );
+  if (verify.length > 0) {
+    lines.push(`After you finish, the companion will itself run and attach the output of: ${verify.map((c) => `\`${c}\``).join(", ")}.`);
+  }
+  lines.push("", "Task:", taskText);
+  return lines.join("\n");
+}
+
+function taskPatchFile(workspaceRoot, jobId) {
+  return resolveJobFile(workspaceRoot, jobId).replace(/\.json$/, ".patch");
+}
+
+function renderIsolationSection(jobId, isolation, escaped) {
+  const lines = [];
+  if (isolation.mode === "worktree" && isolation.write) {
+    lines.push("## Changes (isolated worktree — NOT yet applied to your workspace)", "");
+    if (isolation.changedFiles.length === 0) {
+      lines.push("No file changes were made.");
+    } else {
+      lines.push("```", isolation.diffStat, "```", "");
+      lines.push(`- Worktree: \`${isolation.workPath}\``);
+      lines.push(`- Patch: \`${isolation.patchFile}\``);
+      lines.push(`- Apply after review: \`/agy:apply ${jobId}\` — or drop it: \`/agy:discard ${jobId}\``);
+    }
+  } else if (isolation.mode === "worktree") {
+    if (isolation.changedFiles.length > 0) {
+      lines.push(
+        "## ⚠ Read-only violation",
+        "",
+        `Antigravity modified ${isolation.changedFiles.length} file(s) in its disposable copy; the changes were discarded:`,
+        "```",
+        ...isolation.changedFiles,
+        "```"
+      );
+    }
+  } else if (isolation.note) {
+    lines.push(`> ${isolation.note}`);
+  }
+  if (escaped) {
+    lines.push(
+      "",
+      "## ⚠ Workspace changed during the job",
+      "",
+      "Files in the real workspace changed while the job ran (outside the isolated copy). Check `git status` — the change may come from Antigravity using an absolute path, or from other activity."
+    );
+  }
+  return lines.join("\n");
+}
+
+function summarizeIsolation(isolation) {
+  return {
+    mode: isolation.mode,
+    write: Boolean(isolation.write),
+    workPath: isolation.mode === "worktree" && isolation.write ? isolation.workPath : null,
+    tempDir: isolation.mode === "worktree" && isolation.write ? isolation.tempDir : null,
+    baselineTree: isolation.baselineTree ?? null,
+    patchFile: isolation.patchFile ?? null,
+    changedFiles: isolation.changedFiles ?? [],
+    diffStat: isolation.diffStat ?? "",
+    discarded: Boolean(isolation.discarded),
+    note: isolation.note ?? null
+  };
+}
+
+async function executeTask({ workspaceRoot, jobId, request, progress }) {
+  const verify = request.verify ?? [];
+  const isolation = prepareTaskIsolation({
+    workspaceRoot,
+    write: request.write,
+    inPlace: request.inPlace,
+    reuse: request.reuseIsolation ?? null
+  });
+  const before = isolation.mode === "worktree" ? captureTreeState(workspaceRoot) : null;
+  const prompt = buildTaskPrompt({
+    taskText: request.taskText,
+    isolation,
+    workspaceRoot,
+    callerRel: request.callerRel,
+    write: request.write,
+    verify,
+    resumed: Boolean(request.resumeThreadId)
+  });
+
+  let result;
+  try {
+    progress({ message: `Running on ${request.model} in ${isolation.mode === "worktree" ? "isolated worktree" : "workspace"}...`, phase: "running" });
+    result = await runAgyTurnWithQuota({
+      prompt,
+      cwd: isolation.workPath,
+      write: request.write,
+      model: request.model,
+      resumeThreadId: request.resumeThreadId ?? null,
+      onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId, phase: "running" })
+    }, {
+      maxWaitMs: request.quotaWaitMs ?? 0,
+      onWait: (a) => progress({ message: `Waiting for Gemini quota reset at ${a.resetAt} (in ${formatDuration(a.waitMs)})...`, phase: "waiting-quota" })
+    });
+  } catch (error) {
+    if (!isolation.reused) removeTaskIsolation(isolation, workspaceRoot);
+    throw error;
+  }
+
+  // Capture the model's changes before verification runs, so build/test
+  // artefacts produced by the checks never end up in the patch.
+  const finalIsolation = finalizeTaskIsolation(isolation, {
+    workspaceRoot,
+    patchFile: taskPatchFile(workspaceRoot, jobId),
+    keepReadOnly: true
+  });
+  const escaped = before !== null && captureTreeState(workspaceRoot) !== before;
+
+  let verifications = [];
+  if (verify.length > 0) {
+    verifications = runVerifications(verify, {
+      cwd: isolation.workPath,
+      onStart: (command) => progress({ message: `Verifying: ${command}`, phase: "verifying" })
+    });
+  }
+  if (!request.write) removeTaskIsolation(isolation, workspaceRoot);
+
+  const sections = [result.response.trimEnd()];
+  const isolationText = renderIsolationSection(jobId, finalIsolation, escaped);
+  if (isolationText) sections.push(isolationText);
+  const verifyText = renderVerifications(verifications);
+  if (verifyText) sections.push(verifyText);
+  const rendered = `${sections.join("\n\n")}\n`;
+
+  const verifyFailed = verifications.some((v) => !v.passed);
+  return {
+    exitStatus: result.status === "SUCCESS" && !verifyFailed ? 0 : 1,
+    conversationId: result.conversation_id,
+    payload: {
+      ...result,
+      isolation: summarizeIsolation(finalIsolation),
+      workspaceChangedDuringJob: escaped,
+      verification: verifications
+    },
+    rendered,
+    summary: `${verifyFailed ? "[verification failed] " : ""}${result.response.slice(0, 120).replace(/\r?\n/g, " ")}`
+  };
+}
+
 async function handleTask(argv) {
   const { options, positionals } = parseArgs(argv, {
     valueOptions: ["model", "effort", "cwd", "prompt-file", "wait-for-quota"],
-    booleanOptions: ["json", "write", "background", "wait", "resume-last", "dry-run"],
+    arrayOptions: ["verify"],
+    booleanOptions: ["json", "write", "background", "wait", "resume-last", "dry-run", "in-place", "read-only"],
     aliasMap: { m: "model" }
   });
 
+  if (options.write && options["read-only"]) {
+    throw new Error("--write and --read-only are mutually exclusive.");
+  }
+
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
+  const callerRel = path.relative(workspaceRoot, cwd);
   const userPrompt = readTaskPrompt(cwd, options, positionals);
 
   if (!userPrompt && !options["resume-last"]) {
@@ -201,13 +378,26 @@ async function handleTask(argv) {
     }
   }
 
-  // A resumed conversation already carries the system constraints.
-  const constraints = resume ? "" : loadSystemConstraints();
+  const write = Boolean(options.write);
   const taskText = userPrompt || "Continue the previous task from where you left off.";
-  const fullPrompt = constraints ? `${constraints}\n\nTask:\n${taskText}` : taskText;
   const resumeThreadId = resume?.threadId ?? null;
-
   const modelSelection = resolveTaskModel({ model: options.model, effort: options.effort });
+  const verify = (options.verify ?? []).map((c) => c.trim()).filter(Boolean);
+
+  const request = {
+    cwd,
+    workspaceRoot,
+    callerRel: callerRel && !callerRel.startsWith("..") ? callerRel : "",
+    taskText,
+    write,
+    inPlace: Boolean(options["in-place"]),
+    model: modelSelection.model,
+    effort: options.effort || null,
+    resumeThreadId,
+    reuseIsolation: write && resume?.isolation?.write ? resume.isolation : null,
+    verify,
+    quotaWaitMs: 0
+  };
 
   if (options["dry-run"]) {
     const quota = getQuotaSnapshot({ cwd });
@@ -216,32 +406,34 @@ async function handleTask(argv) {
       dryRun: true,
       command: "task",
       model: modelSelection.model,
-      write: Boolean(options.write),
+      write,
+      isolation: request.inPlace ? "in-place" : "worktree",
       background: Boolean(options.background),
       effort: options.effort || null,
       resumeThreadId,
-      promptChars: fullPrompt.length,
+      verify,
+      promptChars: taskText.length,
       quota,
       quotaAssessment
     };
     const rendered = [
       "# Antigravity Task (Dry Run)",
       `- Model: ${modelSelection.model}`,
-      `- Write mode: ${Boolean(options.write)}`,
+      `- Mode: ${write ? "write" : "read-only"} (${request.inPlace ? "in place" : "isolated worktree"})`,
       `- Background: ${Boolean(options.background)}`,
       `- Resume: ${resume ? `${resume.threadId} (from ${resume.jobId})` : "no"}`,
-      `- Prompt length: ${fullPrompt.length} characters`,
+      `- Verify: ${verify.length ? verify.map((c) => `\`${c}\``).join(", ") : "none"}`,
+      `- Task length: ${taskText.length} characters`,
       `- Gemini Quota: ${describeQuota(quotaAssessment)}`
     ].join("\n");
     outputCommandResult(dryRunPayload, rendered, options.json);
     return;
   }
 
-  const quotaWaitMs = readQuotaWaitMs(options);
-  assertQuotaForLaunch(cwd, quotaWaitMs);
+  request.quotaWaitMs = readQuotaWaitMs(options);
+  assertQuotaForLaunch(cwd, request.quotaWaitMs);
 
   const jobId = generateJobId("task");
-
   const taskMetadata = {
     id: jobId,
     prefix: "task",
@@ -250,51 +442,27 @@ async function handleTask(argv) {
     title: taskText.slice(0, 60).replace(/\r?\n/g, " ") || "Antigravity Task",
     summary: taskText.slice(0, 120),
     workspaceRoot,
-    write: Boolean(options.write),
+    write,
     model: modelSelection.model,
     effort: options.effort || null
   };
-
   const jobRecord = createJobRecord(taskMetadata);
 
   if (options.background) {
     const logFile = createJobLogFile(workspaceRoot, jobId, taskMetadata.title);
     appendLogLine(logFile, `Queued background task on ${modelSelection.model}.`);
-
-    const storedJob = {
-      ...jobRecord,
-      status: "queued",
-      phase: "queued",
-      logFile,
-      request: {
-        cwd,
-        prompt: fullPrompt,
-        write: Boolean(options.write),
-        model: modelSelection.model,
-        effort: options.effort || null,
-        resumeThreadId,
-        quotaWaitMs,
-        jobId
-      }
-    };
-
+    const storedJob = { ...jobRecord, status: "queued", phase: "queued", logFile, request: { ...request, jobId } };
     writeJobFile(workspaceRoot, jobId, storedJob);
 
     const child = spawnDetachedTaskWorker(cwd, jobId);
     storedJob.pid = child.pid || null;
     writeJobFile(workspaceRoot, jobId, storedJob);
 
-    const payload = {
-      jobId,
-      status: "queued",
-      title: taskMetadata.title,
-      logFile
-    };
+    const payload = { jobId, status: "queued", resultPending: true, title: taskMetadata.title, logFile };
     outputCommandResult(payload, renderQueuedTaskLaunch(payload), options.json);
     return;
   }
 
-  // Foreground run
   const logFile = createJobLogFile(workspaceRoot, jobId, taskMetadata.title);
   const progress = createProgressReporter({
     stderr: !options.json,
@@ -304,25 +472,7 @@ async function handleTask(argv) {
 
   const execution = await runTrackedJob(
     { ...jobRecord, logFile },
-    async () => {
-      progress({ message: `Starting task on ${modelSelection.model}...` });
-      const result = await runAgyTurnWithQuota({
-        prompt: fullPrompt,
-        cwd,
-        write: Boolean(options.write),
-        model: modelSelection.model,
-        resumeThreadId,
-        onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
-      }, { maxWaitMs: quotaWaitMs, onWait: quotaWaitReporter(progress) });
-
-      return {
-        exitStatus: result.status === "SUCCESS" ? 0 : 1,
-        conversationId: result.conversation_id,
-        payload: result,
-        rendered: result.response,
-        summary: result.response.slice(0, 120).replace(/\r?\n/g, " ")
-      };
-    },
+    () => executeTask({ workspaceRoot, jobId, request, progress }),
     { logFile }
   );
 
@@ -346,7 +496,9 @@ async function handleTaskWorker(argv) {
   if (!storedJob) throw new Error(`Stored job ${jobId} not found`);
 
   const request = storedJob.request;
-  if (!request) throw new Error(`Stored job ${jobId} is missing request payload`);
+  if (!request || typeof request.taskText !== "string") {
+    throw new Error(`Stored job ${jobId} is missing request payload`);
+  }
 
   // Acquire job slot to prevent concurrency race on last_conversations.json
   const slot = await acquireJobSlot(cwd, { timeoutMs: 60_000 });
@@ -361,30 +513,62 @@ async function handleTaskWorker(argv) {
   try {
     await runTrackedJob(
       { ...storedJob, logFile },
-      async () => {
-        progress({ message: `Worker executing task on ${request.model || "Gemini"}...` });
-        const result = await runAgyTurnWithQuota({
-          prompt: request.prompt,
-          cwd: request.cwd,
-          write: request.write,
-          model: request.model,
-          resumeThreadId: request.resumeThreadId ?? null,
-          onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
-        }, { maxWaitMs: request.quotaWaitMs ?? 0, onWait: quotaWaitReporter(progress) });
-
-        return {
-          exitStatus: result.status === "SUCCESS" ? 0 : 1,
-          conversationId: result.conversation_id,
-          payload: result,
-          rendered: result.response,
-          summary: result.response.slice(0, 120).replace(/\r?\n/g, " ")
-        };
-      },
+      () => executeTask({ workspaceRoot, jobId, request, progress }),
       { logFile }
     );
   } finally {
     slot.release();
   }
+}
+
+function resolveIsolatedJob(cwd, reference) {
+  const { workspaceRoot, job } = resolveResultJob(cwd, reference);
+  const isolation = job.result?.isolation;
+  if (!isolation || isolation.mode !== "worktree" || !isolation.write) {
+    throw new Error(`Job ${job.id} has no isolated write changes.`);
+  }
+  return { workspaceRoot, job, isolation };
+}
+
+function markIsolation(workspaceRoot, job, patch) {
+  const updated = {
+    ...job,
+    result: { ...job.result, isolation: { ...job.result.isolation, ...patch } },
+    updatedAt: new Date().toISOString()
+  };
+  writeJobFile(workspaceRoot, job.id, updated);
+}
+
+function handleApply(argv) {
+  const { options, positionals } = parseArgs(normalizeArgv(argv), {
+    valueOptions: ["cwd"],
+    booleanOptions: ["json", "keep-worktree"]
+  });
+  const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
+  const { workspaceRoot, job, isolation } = resolveIsolatedJob(cwd, positionals[0] ?? "");
+  if (isolation.appliedAt) {
+    throw new Error(`Job ${job.id} was already applied at ${isolation.appliedAt}.`);
+  }
+  const stat = applyTaskPatch(workspaceRoot, isolation.patchFile);
+  if (!options["keep-worktree"]) {
+    removeTaskIsolation(isolation, workspaceRoot);
+  }
+  markIsolation(workspaceRoot, job, { appliedAt: new Date().toISOString(), workPath: options["keep-worktree"] ? isolation.workPath : null });
+  const payload = { jobId: job.id, applied: true, stat };
+  outputCommandResult(payload, `# Applied Antigravity changes from \`${job.id}\`\n\n\`\`\`\n${stat}\n\`\`\`\n\nReview with \`git diff\`; nothing was committed.\n`, options.json);
+}
+
+function handleDiscard(argv) {
+  const { options, positionals } = parseArgs(normalizeArgv(argv), {
+    valueOptions: ["cwd"],
+    booleanOptions: ["json"]
+  });
+  const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
+  const { workspaceRoot, job, isolation } = resolveIsolatedJob(cwd, positionals[0] ?? "");
+  removeTaskIsolation(isolation, workspaceRoot);
+  if (isolation.patchFile && fs.existsSync(isolation.patchFile)) fs.rmSync(isolation.patchFile, { force: true });
+  markIsolation(workspaceRoot, job, { discardedAt: new Date().toISOString(), workPath: null, patchFile: null });
+  outputCommandResult({ jobId: job.id, discarded: true }, `Discarded Antigravity changes from \`${job.id}\`.\n`, options.json);
 }
 
 function spawnDetachedReviewWorker(cwd, jobId) {
@@ -450,7 +634,7 @@ async function handleReviewWorker(argv) {
           write: false,
           model: request.model,
           jsonSchema: schemaContent,
-          onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
+          onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId, phase: "running" })
         }, { maxWaitMs: request.quotaWaitMs ?? 0, onWait: quotaWaitReporter(progress) });
 
         let parsedData = null;
@@ -625,7 +809,7 @@ async function handleReview(argv) {
           write: false,
           model: modelSelection.model,
           jsonSchema: schemaContent,
-          onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId })
+          onProgress: (p) => progress({ message: p.message, conversationId: p.conversationId, phase: "running" })
         }, { maxWaitMs: quotaWaitMs, onWait: quotaWaitReporter(progress) });
 
         let parsedData = null;
@@ -754,13 +938,15 @@ async function main() {
         "",
         "Usage:",
         "  node agy-companion.mjs setup [--json]",
-        "  node agy-companion.mjs task [--background|--wait] [--write] [--model <model>] [--effort low|medium|high] [--prompt-file <path>] [--resume-last] [--wait-for-quota <15m>] [--dry-run] [prompt]",
+        "  node agy-companion.mjs task [--background|--wait] [--write [--in-place]|--read-only] [--verify <cmd>]... [--model <model>] [--effort low|medium|high] [--prompt-file <path>] [--resume-last] [--wait-for-quota <15m>] [--dry-run] [prompt]",
         "  node agy-companion.mjs task-worker --cwd <cwd> --job-id <id>",
         "  node agy-companion.mjs review [--base <ref>] [--scope <scope>] [--wait-for-quota <15m>] [focus]",
         "  node agy-companion.mjs review-worker --cwd <cwd> --job-id <id>",
         "  node agy-companion.mjs status [job-id] [--all] [--json]",
         "  node agy-companion.mjs result [job-id] [--json]",
-        "  node agy-companion.mjs cancel [job-id] [--json]"
+        "  node agy-companion.mjs cancel [job-id] [--json]",
+        "  node agy-companion.mjs apply [job-id] [--keep-worktree] [--json]",
+        "  node agy-companion.mjs discard [job-id] [--json]"
       ].join("\n")
     );
     return;
@@ -790,6 +976,12 @@ async function main() {
       break;
     case "cancel":
       handleCancel(rest);
+      break;
+    case "apply":
+      handleApply(rest);
+      break;
+    case "discard":
+      handleDiscard(rest);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);

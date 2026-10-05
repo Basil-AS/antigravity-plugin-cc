@@ -64,7 +64,7 @@ test("findLastTaskConversation returns the newest task with a conversation id", 
       id: "task-running", jobClass: "task", threadId: null, updatedAt: "2026-10-04T00:00:00Z"
     });
 
-    assert.deepEqual(findLastTaskConversation(workspace), { jobId: "task-new", threadId: "conv-new" });
+    assert.deepEqual(findLastTaskConversation(workspace), { jobId: "task-new", threadId: "conv-new", isolation: null });
   });
 });
 
@@ -82,7 +82,7 @@ test("companion task --dry-run honours --effort, --prompt-file and --wait", () =
     assert.equal(data.model, "gemini-3.8-flash-high");
     assert.equal(data.effort, "high");
     assert.equal(data.resumeThreadId, null);
-    assert.ok(data.promptChars > "Write unit tests for lib/args.mjs".length);
+    assert.equal(data.promptChars, "Write unit tests for lib/args.mjs".length);
   });
 });
 

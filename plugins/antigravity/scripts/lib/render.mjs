@@ -83,13 +83,15 @@ export function renderSetupReport(setupData) {
 
 export function renderQueuedTaskLaunch(payload) {
   const lines = [
-    `# Queued Antigravity Task: \`${payload.jobId}\``,
+    `# Antigravity task queued — RESULT PENDING: \`${payload.jobId}\``,
+    "",
+    "This is only the launch receipt; the task is still running and has produced no result yet.",
     "",
     `- **Status:** \`${payload.status}\``,
     `- **Title:** ${payload.title || "Task"}`,
     `- **Log File:** \`${payload.logFile}\``,
     "",
-    "Check progress anytime with `/agy:status` or get output with `/agy:result`."
+    `Poll with \`/agy:status ${payload.jobId}\`; fetch the output with \`/agy:result ${payload.jobId}\` once it is completed.`
   ];
   return `${lines.join("\n")}\n`;
 }
