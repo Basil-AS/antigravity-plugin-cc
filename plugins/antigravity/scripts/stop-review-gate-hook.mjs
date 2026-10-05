@@ -34,13 +34,13 @@ async function main() {
   const config = getConfig(workspaceRoot);
 
   if (!config.stopReviewGate) {
-    emitDecision({ decision: "ALLOW" });
+    emitDecision({});
     return;
   }
 
   const lastAssistantMessage = String(input.last_assistant_message ?? "").trim();
   if (!lastAssistantMessage) {
-    emitDecision({ decision: "ALLOW" });
+    emitDecision({});
     return;
   }
 
@@ -61,19 +61,19 @@ async function main() {
     const firstLine = (result.response || "").split(/\r?\n/)[0].trim();
     if (firstLine.startsWith("BLOCK:")) {
       emitDecision({
-        decision: "BLOCK",
+        decision: "block",
         reason: firstLine.slice("BLOCK:".length).trim() || "Antigravity stop-gate blocked this change."
       });
       return;
     }
 
-    emitDecision({ decision: "ALLOW" });
+    emitDecision({});
   } catch {
     // Fail-open on hook timeout or evaluation error so user is not stuck
-    emitDecision({ decision: "ALLOW" });
+    emitDecision({});
   }
 }
 
 main().catch(() => {
-  emitDecision({ decision: "ALLOW" });
+  emitDecision({});
 });

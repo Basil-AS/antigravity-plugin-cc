@@ -1,0 +1,12 @@
+Antigravity Plugin for Claude Code
+Copyright 2026 Basil-AS
+
+This product includes software developed under the Apache License 2.0.
+
+Attributions and Acknowledgements:
+- Claude Code Plugin Architecture & Codex Reference:
+  Inspired by and adapted from OpenAI's codex-plugin-cc (https://github.com/openai/codex-plugin-cc).
+- Google Antigravity CLI:
+  Designed for integration with Google's Antigravity CLI and Gemini models (https://antigravity.google).
+- Community Open-Source Insights:
+  Architectural patterns refined from community adaptations (arcobaleno64, santiquiroz, MarcosNahuel, theeranon, kozaksv, jinseo-jang).

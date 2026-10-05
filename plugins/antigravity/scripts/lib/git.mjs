@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { isProbablyText } from "./fs.mjs";
 import { formatCommandFailure, runCommand, runCommandChecked } from "./process.mjs";
+import { isSecretFilePath, redactSecretContent, sanitizeDiffText, REDACTED_FILE_CONTENT } from "./secrets.mjs";
 
 const MAX_UNTRACKED_BYTES = 24 * 1024;
 const MAX_UNTRACKED_FILES = 50;
@@ -143,6 +144,9 @@ function formatSection(title, body) {
 }
 
 function formatUntrackedFile(cwd, relativePath) {
+  if (isSecretFilePath(relativePath)) {
+    return `### ${relativePath}\n${REDACTED_FILE_CONTENT}`;
+  }
   const absolutePath = path.join(cwd, relativePath);
   let stat;
   try {
@@ -167,7 +171,8 @@ function formatUntrackedFile(cwd, relativePath) {
     return `### ${relativePath}\n(skipped: binary file)`;
   }
 
-  return [`### ${relativePath}`, "```", buffer.toString("utf8").trimEnd(), "```"].join("\n");
+  const content = redactSecretContent(buffer.toString("utf8").trimEnd(), relativePath);
+  return [`### ${relativePath}`, "```", content, "```"].join("\n");
 }
 
 export function collectReviewContext(cwd, target, options = {}) {
@@ -177,8 +182,10 @@ export function collectReviewContext(cwd, target, options = {}) {
 
   if (target.mode === "working-tree") {
     const status = gitChecked(cwd, ["status", "--short", "--untracked-files=all"]).stdout.trim();
-    const stagedDiff = gitChecked(cwd, ["diff", "--cached", "--binary", "--no-ext-diff"]).stdout;
-    const unstagedDiff = gitChecked(cwd, ["diff", "--binary", "--no-ext-diff"]).stdout;
+    const rawStaged = gitChecked(cwd, ["diff", "--cached", "--binary", "--no-ext-diff"]).stdout;
+    const rawUnstaged = gitChecked(cwd, ["diff", "--binary", "--no-ext-diff"]).stdout;
+    const stagedDiff = sanitizeDiffText(rawStaged);
+    const unstagedDiff = sanitizeDiffText(rawUnstaged);
     let totalUntrackedBytes = 0;
     const formattedUntracked = [];
     let omittedCount = 0;
@@ -221,7 +228,8 @@ export function collectReviewContext(cwd, target, options = {}) {
   const baseRef = target.baseRef;
   const mergeBase = gitChecked(cwd, ["merge-base", "HEAD", baseRef]).stdout.trim();
   const commitLog = gitChecked(cwd, ["log", "--oneline", `${mergeBase}..HEAD`]).stdout.trim();
-  const diffText = gitChecked(cwd, ["diff", "--binary", "--no-ext-diff", `${baseRef}...HEAD`]).stdout;
+  const rawDiff = gitChecked(cwd, ["diff", "--binary", "--no-ext-diff", `${baseRef}...HEAD`]).stdout;
+  const diffText = sanitizeDiffText(rawDiff);
   const nameOnly = gitChecked(cwd, ["diff", "--name-only", `${baseRef}...HEAD`]).stdout.trim();
   const changedFiles = nameOnly.split("\n").filter(Boolean);
 

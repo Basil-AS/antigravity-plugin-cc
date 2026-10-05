@@ -71,7 +71,7 @@ claude plugin marketplace add Basil-AS/antigravity-plugin-cc
 
 ### Step 2: Install the Plugin
 ```bash
-claude plugin install antigravity@google-antigravity
+claude plugin install agy@google-antigravity
 ```
 
 ### Step 3: Verify Setup
