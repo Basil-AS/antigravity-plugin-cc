@@ -1,5 +1,0 @@
-# BEGIN UNIVERSAL AGENT KIT
-.agent-cache/**
-.agents/runtime/**
-.agents/tmp/**
-# END UNIVERSAL AGENT KIT

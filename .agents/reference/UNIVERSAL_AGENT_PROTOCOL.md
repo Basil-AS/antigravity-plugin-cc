@@ -13,7 +13,7 @@
 ### 0.0 Как подключать этот протокол
 
 Предпочтительный вариант — использовать компактный файл
-`SYSTEM_PROMPT.md` / `.agents/reference/UNIVERSAL_AGENT_BOOTSTRAP.md` как
+`.agents/reference/UNIVERSAL_AGENT_BOOTSTRAP.md` как
 глобальный system prompt. Этот полный протокол хранится в репозитории как
 точечный нормативный справочник и загружается только для сложных случаев.
 
