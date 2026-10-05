@@ -5,7 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { runAgyTurn } from "./lib/agy.mjs";
+import { runAgyTurnWithQuota } from "./lib/agy.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "./lib/prompts.mjs";
 import { getConfig } from "./lib/state.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
@@ -51,7 +51,7 @@ async function main() {
   });
 
   try {
-    const result = await runAgyTurn({
+    const result = await runAgyTurnWithQuota({
       prompt,
       cwd,
       sandbox: true,
@@ -71,7 +71,8 @@ async function main() {
 
     emitDecision({});
   } catch {
-    // Fail-open on hook timeout or evaluation error so user is not stuck
+    // Fail-open on hook timeout, exhausted Gemini quota (fails fast, no wait)
+    // or evaluation error so the user is not stuck
     emitDecision({});
   }
 }

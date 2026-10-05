@@ -88,7 +88,7 @@ This checks your Node, Git, `agy` binary, Google authentication status, and Gemi
 | Command | Syntax | Description |
 | :--- | :--- | :--- |
 | **`/agy:setup`** | `/agy:setup [--enable-review-gate \| --disable-review-gate]` | Verifies environment readiness, auth, and quota balance. |
-| **`/agy:rescue`** | `/agy:rescue [--write] [--background\|--wait] [--model <name>] [--effort low\|medium\|high] [--prompt-file <path>] [--resume-last] [--dry-run] <prompt>` | Delegate a task to Antigravity CLI. `--write` permits file edits, `--background` runs async, `--effort` picks `gemini-3.8-flash-<effort>` (ignored with `--model`), `--prompt-file` reads the task from a file, `--resume-last` continues the latest task conversation, `--dry-run` previews without calling Gemini. |
+| **`/agy:rescue`** | `/agy:rescue [--write] [--background\|--wait] [--model <name>] [--effort low\|medium\|high] [--prompt-file <path>] [--resume-last] [--wait-for-quota <15m>] [--dry-run] <prompt>` | Delegate a task to Antigravity CLI. `--write` permits file edits, `--background` runs async, `--effort` picks `gemini-3.8-flash-<effort>` (ignored with `--model`), `--prompt-file` reads the task from a file, `--resume-last` continues the latest task conversation, `--dry-run` previews without calling Gemini. |
 | **`/agy:review`** | `/agy:review [--base <ref>] [--dry-run] [--background] [focus]` | Run an objective, schema-validated code review in an isolated shadow worktree. |
 | **`/agy:status`** | `/agy:status [job-id] [--all]` | Inspect in-progress and recent background tasks and reviews. |
 | **`/agy:result`** | `/agy:result [job-id]` | Retrieve the full formatted output or structured findings of a completed job. |
@@ -124,11 +124,25 @@ This checks your Node, Git, `agy` binary, Google authentication status, and Gemi
 
 ---
 
+## ⏳ Gemini Quota Handling
+
+Antigravity meters Gemini in two windows (weekly and five-hour); all Gemini models share one pool. The companion:
+
+- reads both windows from `agy -p /usage` and treats the pool as only as available as the tightest one (shown by `/agy:setup` and every `--dry-run`);
+- checks the pool before every task and review (cached for 90 s) and refuses with exit code **75** and `Antigravity Gemini quota exhausted (five-hour limit, 1% left). Resets at … (in 1h 40m).` instead of sending work to an exhausted pool (`--json` adds `quotaExhausted`, `window`, `percent`, `resetAt`, `waitMs`; MCP tools return it with `isError: true`);
+- converts agy's own quota failures (429 / `RESOURCE_EXHAUSTED`) into the same error;
+- waits only when asked: `--wait-for-quota 15m` (MCP `wait_for_quota`) waits for a reset that lands within that budget, otherwise fails immediately;
+- skips the optional stop-gate review instantly (fail-open) when the pool is exhausted.
+
+The threshold defaults to 2% and can be changed with `AGY_QUOTA_MIN_PERCENT`.
+
+---
+
 ## 🤖 Stdio MCP Server (Autonomous Mode)
 
 When Claude Code is reasoning on complex tasks, it can invoke Antigravity tools directly through the local Model Context Protocol (MCP) server defined in `plugins/antigravity/.mcp.json`:
 
-- **`agy_rescue`**: Autonomous worker execution (`prompt`, `write`, `background`, `model`, `effort`, `resume_last`).
+- **`agy_rescue`**: Autonomous worker execution (`prompt`, `write`, `background`, `model`, `effort`, `resume_last`, `wait_for_quota`).
 - **`agy_review`**: Read-only diff review against a base branch or working tree.
 - **`agy_status`**: Poll active jobs and background progress.
 - **`agy_result`**: Fetch results upon completion.
