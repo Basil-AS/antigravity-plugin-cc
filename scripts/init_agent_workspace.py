@@ -5,7 +5,6 @@ from pathlib import Path
 import shutil
 
 from agentlib import (
-    CURSOR_IGNORE_BLOCK,
     KIT_IGNORE_BLOCK,
     find_root,
     replace_marked_block,
@@ -49,7 +48,6 @@ def main() -> int:
                 path.mkdir(parents=True, exist_ok=True)
 
     copy_if_missing = [
-        "AGENT.local.example.md",
         ".agents/protocol-version",
         ".agents/reference/UNIVERSAL_AGENT_BOOTSTRAP.md",
         ".agents/reference/UNIVERSAL_AGENT_PROTOCOL.md",
@@ -76,13 +74,6 @@ def main() -> int:
         root / ".gitignore", "UNIVERSAL AGENT KIT", KIT_IGNORE_BLOCK, args.dry_run
     ):
         created.append(".gitignore marker")
-    if replace_marked_block(
-        root / ".cursorindexingignore",
-        "UNIVERSAL AGENT KIT",
-        CURSOR_IGNORE_BLOCK,
-        args.dry_run,
-    ):
-        created.append(".cursorindexingignore marker")
 
     print(f"Root: {root}")
     if created:

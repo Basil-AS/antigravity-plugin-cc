@@ -119,7 +119,7 @@ RECONCILE → UNDERSTAND → ROUTE → PLAN → ISOLATE → EXECUTE
   ```
   Примеры соавторства по агентам:
   - Google Antigravity: `Co-authored-by: Antigravity Agent <antigravity@google.com>`
-  - Claude Code: `Co-authored-by: Claude Code <claude@anthropic.com>`
+  - Claude Code: `Co-authored-by: Claude <noreply@anthropic.com>` (единственный email, привязанный к GitHub; совпадает с `GLOBAL_AGENT_RULES.md`)
   - Codex CLI: `Co-authored-by: Codex Agent <codex@openai.com>`
   - Kimi Code: `Co-authored-by: Kimi Code <kimi@moonshot.cn>`
 - **GitHub Workflow, Изоляция Веток и Обязательные Pull Requests**:
@@ -135,9 +135,10 @@ RECONCILE → UNDERSTAND → ROUTE → PLAN → ISOLATE → EXECUTE
 ## 6. Спецификация Инструментария и Интеграций
 
 ### RTK (Token Compression & Fast CLI Output)
-- Обязателен для команд с потенциально большим выводом: `rtk git status`, `rtk git diff`, `rtk git log`, `rtk pytest`, `rtk npm test`.
+- Обязателен всегда для команд с потенциально большим выводом: `rtk git status`, `rtk git diff`, `rtk git log`, `rtk pytest`, `rtk npm test`.
 - Настройка: `RTK_TELEMETRY_DISABLED=1`.
 - Для получения сырого вывода используй `RTK_DISABLED=1 <command>`.
+- **Сбой / Недоступность RTK**: если RTK недоступен или выдал ошибку — пропустить и выполнить команду напрямую, но **ОБЯЗАТЕЛЬНО ЯВНО СООБЩИТЬ ОБ ЭТОМ ПОЛЬЗОВАТЕЛЮ**.
 
 ### Gortex (Code Knowledge Graph & AST Intelligence)
 - Используется для анализа архитектуры, графа вызовов (call graph), поиска символов, связей и blast radius при изменениях.
@@ -149,7 +150,8 @@ RECONCILE → UNDERSTAND → ROUTE → PLAN → ISOLATE → EXECUTE
   gortex track .
   gortex init --analyze --skills-min-size 5 --skills-max 10
   ```
--При запросе информации о коде предпочитай графовые MCP/CLI вызовы (`get_repo_outline`, `smart_context`, `find_usages`, `call-chain`) вместо полного чтения множества файлов подряд.
+- При запросе информации о коде **ОБЯЗАТЕЛЬНО ВСЕГДА** использовать графовые MCP/CLI вызовы (`explore`, `analyze`, `trace`, `get_repo_outline`, `smart_context`, `call-chain`) вместо слепого чтения множества файлов подряд.
+- **Сбой / Недоступность Gortex**: если Gortex недоступен или выдает ошибку — переключиться на стандартные файловые инструменты, но **ОБЯЗАТЕЛЬНО ЯВНО СООБЩИТЬ ОБ ЭТОМ ПОЛЬЗОВАТЕЛЮ**.
 
 ### Superpowers (`obra/superpowers`)
 - Процессные инженерные навыки:

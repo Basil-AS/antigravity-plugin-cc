@@ -16,7 +16,6 @@ def main() -> int:
             errors.append(f"{path.relative_to(ROOT)}: {exc}")
 
     required = [
-        "SYSTEM_PROMPT.md",
         "AGENTS.md",
         ".agents/reference/UNIVERSAL_AGENT_BOOTSTRAP.md",
         ".agents/reference/UNIVERSAL_AGENT_PROTOCOL.md",

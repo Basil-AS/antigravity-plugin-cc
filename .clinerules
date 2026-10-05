@@ -1,3 +1,0 @@
-Read and follow AGENTS.md and .agents/reference/UNIVERSAL_AGENT_BOOTSTRAP.md.
-Run scripts/agent_context.py when Python is available. Restore active task
-before editing and keep TASK/JOURNAL/HANDOFF current.
