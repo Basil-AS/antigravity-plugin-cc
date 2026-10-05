@@ -1,0 +1,39 @@
+name: Bug Report
+description: Create a report to help us improve the Antigravity plugin
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report! Please fill out the sections below.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment Info
+      description: OS version, Node.js version (`node -v`), agy version (`agy --version`), Claude Code version.
+      placeholder: "e.g., Linux Fedora 41, Node v22.14.0, agy 1.2.16, claude 1.0.0"
+    validations:
+      required: true
+  - type: textarea
+    id: describe-bug
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what went wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Provide commands or steps to reproduce the behavior.
+      placeholder: |
+        1. Run `/agy:rescue "..."`
+        2. Observe error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Output
+      description: Paste any terminal logs or `/agy:status` error output here.
+      render: shell
