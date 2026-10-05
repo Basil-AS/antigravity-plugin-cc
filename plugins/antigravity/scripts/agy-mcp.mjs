@@ -161,7 +161,7 @@ async function main() {
         result: {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "antigravity-mcp", version: "1.0.2" }
+          serverInfo: { name: "antigravity-mcp", version: "1.0.3" }
         }
       };
       process.stdout.write(JSON.stringify(response) + "\n");

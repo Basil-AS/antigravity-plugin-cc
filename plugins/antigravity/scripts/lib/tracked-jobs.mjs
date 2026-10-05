@@ -106,7 +106,6 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
       ...patch
     };
     writeJobFile(workspaceRoot, jobId, updated);
-    upsertJob(workspaceRoot, updated);
   };
 }
 
