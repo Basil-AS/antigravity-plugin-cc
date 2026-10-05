@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Antigravity CLI (agy / Gemini) plugins for Claude Code to delegate tasks and review code.",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "plugins": [
     {
       "name": "agy",
       "description": "Delegate tasks and run code reviews with Google Antigravity CLI (agy / Gemini) from Claude Code.",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": {
         "name": "Google Antigravity"
       },
