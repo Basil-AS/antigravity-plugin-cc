@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import { readJobFile, resolveJobFile, resolveJobLogFile, upsertJob, writeJobFile } from "./state.mjs";
+import { readJobFile, resolveJobFile, resolveJobLogFile, writeJobFile } from "./state.mjs";
 
 export const SESSION_ID_ENV = "AGY_COMPANION_SESSION_ID";
 
@@ -106,7 +106,6 @@ export function createJobProgressUpdater(workspaceRoot, jobId) {
       ...patch
     };
     writeJobFile(workspaceRoot, jobId, updated);
-    upsertJob(workspaceRoot, updated);
   };
 }
 

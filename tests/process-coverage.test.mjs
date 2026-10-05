@@ -107,7 +107,9 @@ test("runCommand supports stdin input via options.input", () => {
   assert.equal(result.stdout, inputPayload);
 });
 
-test("runCommand reports signal and maps null status to 0 when child is killed", () => {
+test("runCommand reports signal and maps null status to 0 when child is killed", {
+  skip: process.platform === "win32" ? "POSIX signals not supported on Windows" : false
+}, () => {
   const result = runCommand(process.execPath, [
     "-e",
     "process.kill(process.pid, 'SIGTERM'); setTimeout(() => {}, 10000);"
@@ -127,7 +129,7 @@ test("runCommand handles large stdout output without truncation", () => {
 
   assert.equal(result.status, 0);
   assert.equal(result.error, null);
-  const lines = result.stdout.trim().split("\n");
+  const lines = result.stdout.trim().split(/\r?\n/);
   assert.equal(lines.length, lineCount);
   assert.equal(lines[0], "line 0");
   assert.equal(lines[lineCount - 1], `line ${lineCount - 1}`);
@@ -145,7 +147,18 @@ test("runCommand surfaces ENOBUFS error when maxBuffer limit is exceeded", () =>
   assert.equal(result.error.code, "ENOBUFS");
 });
 
-test("runCommand defaults args and options safely when omitted", () => {
+test("runCommand defaults args to [] and options when omitted", {
+  skip: process.platform === "win32" ? "echo is a shell builtin on Windows" : false
+}, () => {
+  const result = runCommand("echo", undefined);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.args, []);
+  assert.equal(result.stdout.trim(), "");
+});
+
+test("runCommand works when options are omitted", () => {
   const result = runCommand(process.execPath, ["--version"]);
 
   assert.equal(result.status, 0);
