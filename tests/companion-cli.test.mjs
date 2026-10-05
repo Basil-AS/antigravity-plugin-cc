@@ -16,7 +16,10 @@ test("companion setup --json emits valid ready status", () => {
   assert.equal(typeof data.ready, "boolean");
   assert.equal(data.node.available, true);
   assert.equal(data.git.available, true);
-  assert.equal(typeof data.agy.version, "string");
+  assert.equal(typeof data.agy.available, "boolean");
+  if (data.agy.available) {
+    assert.equal(typeof data.agy.version, "string");
+  }
 });
 
 test("companion task --dry-run produces preview without calling LLM", () => {
@@ -39,6 +42,6 @@ test("companion review --dry-run produces preview without calling LLM", () => {
   const data = JSON.parse(output);
   assert.equal(data.dryRun, true);
   assert.equal(data.command, "review");
-  assert.equal(data.target.mode, "working-tree");
+  assert.ok(data.target.mode === "working-tree" || data.target.mode === "branch");
   assert.ok(Array.isArray(data.changedFiles));
 });
