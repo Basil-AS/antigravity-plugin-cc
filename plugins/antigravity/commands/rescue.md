@@ -4,8 +4,8 @@ argument-hint: '[--background|--wait] [--write] [--model <gemini-model>] [what A
 allowed-tools: Bash(node:*), AskUserQuestion, Agent
 ---
 
-Invoke the `antigravity:agy-rescue` subagent via the `Agent` tool (`subagent_type: "antigravity:agy-rescue"`), forwarding the raw user request as the prompt.
-`antigravity:agy-rescue` is a subagent, not a skill — do not call `Skill(...)`.
+Invoke the `agy:agy-rescue` subagent via the `Agent` tool (`subagent_type: "agy:agy-rescue"`), forwarding the raw user request as the prompt.
+`agy:agy-rescue` is a subagent, not a skill — do not call `Skill(...)`.
 
 Raw user request:
 $ARGUMENTS
