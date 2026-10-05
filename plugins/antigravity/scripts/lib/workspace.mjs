@@ -2,11 +2,6 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 
 export function resolveWorkspaceRoot(cwd = process.cwd()) {
-  const citcMatch = cwd.match(/^(\/google\/src\/cloud\/[^/]+\/[^/]+)/);
-  if (citcMatch) {
-    return citcMatch[1];
-  }
-
   try {
     const gitRoot = execSync("git rev-parse --show-toplevel", {
       cwd,
@@ -24,10 +19,6 @@ export function resolveWorkspaceRoot(cwd = process.cwd()) {
 }
 
 export function resolveWorkspaceName(cwd = process.cwd()) {
-  const citcMatch = cwd.match(/\/google\/src\/cloud\/[^/]+\/([^/]+)/);
-  if (citcMatch) {
-    return citcMatch[1];
-  }
   const root = resolveWorkspaceRoot(cwd);
   return path.basename(root) || "workspace";
 }

@@ -126,3 +126,12 @@ export function splitRawArgumentString(raw) {
 
   return tokens;
 }
+
+// Slash commands pass "$ARGUMENTS" as one quoted shell word. Split it back into
+// tokens so `status "abc123 --all"` behaves like `status abc123 --all`.
+export function normalizeArgv(argv) {
+  if (argv.length === 1) {
+    return splitRawArgumentString(argv[0]);
+  }
+  return argv;
+}

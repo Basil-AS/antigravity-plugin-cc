@@ -1,5 +1,20 @@
 import { spawnSync } from "node:child_process";
+import os from "node:os";
 import process from "node:process";
+
+// spawnSync reports status=null when the child never ran (spawn error) or was
+// killed by a signal (including a timeout). Never map that to 0: a dead process
+// must not look successful. Signals follow the shell convention 128 + signo.
+export function resolveExitStatus(result) {
+  if (Number.isInteger(result.status)) {
+    return result.status;
+  }
+  if (result.signal) {
+    const signo = os.constants.signals[result.signal];
+    return Number.isInteger(signo) ? 128 + signo : 128;
+  }
+  return result.error ? 1 : 0;
+}
 
 export function runCommand(command, args = [], options = {}) {
   const useShell = process.platform === "win32" && options.windowsShell === true;
@@ -9,6 +24,8 @@ export function runCommand(command, args = [], options = {}) {
     encoding: "utf8",
     input: options.input,
     maxBuffer: options.maxBuffer,
+    timeout: options.timeout,
+    killSignal: options.killSignal,
     stdio: options.stdio ?? "pipe",
     shell: useShell,
     windowsHide: true
@@ -17,7 +34,7 @@ export function runCommand(command, args = [], options = {}) {
   return {
     command,
     args,
-    status: result.status ?? 0,
+    status: resolveExitStatus(result),
     signal: result.signal ?? null,
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
@@ -30,7 +47,7 @@ export function runCommandChecked(command, args = [], options = {}) {
   if (result.error) {
     throw result.error;
   }
-  if (result.status !== 0) {
+  if (result.status !== 0 || result.signal) {
     throw new Error(formatCommandFailure(result));
   }
   return result;

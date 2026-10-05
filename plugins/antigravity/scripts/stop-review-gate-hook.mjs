@@ -11,6 +11,7 @@ import { getConfig } from "./lib/state.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 
 const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const STOP_GATE_TIMEOUT_MS = 180_000;
 
 function readHookInput() {
   if (process.stdin.isTTY) return {};
@@ -55,7 +56,8 @@ async function main() {
       cwd,
       sandbox: true,
       write: false,
-      timeoutMs: 60_000
+      // Must stay below the Stop hook budget in hooks/hooks.json (900s).
+      timeoutMs: STOP_GATE_TIMEOUT_MS
     });
 
     const firstLine = (result.response || "").split(/\r?\n/)[0].trim();

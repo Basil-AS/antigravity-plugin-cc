@@ -47,7 +47,9 @@ export function probeAgyUsage(options = {}) {
 
   const result = runCommand(agyBinary, ["-p", "/usage", "--output-format", "text", "--print-timeout", "30s"], {
     env,
-    cwd: options.cwd || process.cwd()
+    cwd: options.cwd || process.cwd(),
+    // Hard ceiling above agy's own --print-timeout so a hung CLI cannot stall setup.
+    timeout: options.timeoutMs ?? 45_000
   });
 
   if (result.status !== 0) {

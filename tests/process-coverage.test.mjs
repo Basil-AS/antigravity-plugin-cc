@@ -5,7 +5,7 @@ import process from "node:process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { runCommand } from "../plugins/antigravity/scripts/lib/process.mjs";
+import { runCommand, runCommandChecked, resolveExitStatus } from "../plugins/antigravity/scripts/lib/process.mjs";
 
 test("runCommand handles nonexistent command returning ENOENT error", () => {
   const result = runCommand("__nonexistent_cmd_404__", ["--version"]);
@@ -16,7 +16,7 @@ test("runCommand handles nonexistent command returning ENOENT error", () => {
   assert.equal(result.error.code, "ENOENT");
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 1);
   assert.equal(result.signal, null);
 });
 
@@ -107,7 +107,7 @@ test("runCommand supports stdin input via options.input", () => {
   assert.equal(result.stdout, inputPayload);
 });
 
-test("runCommand reports signal and maps null status to 0 when child is killed", {
+test("runCommand reports signal and maps null status to 128+signo when child is killed", {
   skip: process.platform === "win32" ? "POSIX signals not supported on Windows" : false
 }, () => {
   const result = runCommand(process.execPath, [
@@ -116,7 +116,7 @@ test("runCommand reports signal and maps null status to 0 when child is killed",
   ]);
 
   assert.equal(result.signal, "SIGTERM");
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 128 + os.constants.signals.SIGTERM);
   assert.equal(result.error, null);
 });
 
@@ -165,4 +165,40 @@ test("runCommand works when options are omitted", () => {
   assert.equal(result.error, null);
   assert.ok(result.stdout.trim().startsWith("v"));
   assert.deepEqual(result.args, ["--version"]);
+});
+
+test("runCommand enforces options.timeout and reports the kill as non-zero", () => {
+  const started = Date.now();
+  const result = runCommand(process.execPath, ["-e", "setTimeout(() => {}, 10000);"], {
+    timeout: 300
+  });
+
+  assert.ok(Date.now() - started < 5000, "child should be killed long before it exits on its own");
+  assert.ok(result.error);
+  assert.equal(result.error.code, "ETIMEDOUT");
+  assert.notEqual(result.status, 0);
+});
+
+test("runCommandChecked throws when the child is killed by a signal", {
+  skip: process.platform === "win32" ? "POSIX signals not supported on Windows" : false
+}, () => {
+  assert.throws(
+    () => runCommandChecked(process.execPath, ["-e", "process.kill(process.pid, 'SIGKILL');"]),
+    /signal=SIGKILL/
+  );
+});
+
+test("runCommandChecked throws on non-zero exit and returns on success", () => {
+  assert.throws(() => runCommandChecked(process.execPath, ["-e", "process.exit(3)"]), /exit=3/);
+  const ok = runCommandChecked(process.execPath, ["-e", "console.log('ok')"]);
+  assert.equal(ok.status, 0);
+  assert.equal(ok.stdout.trim(), "ok");
+});
+
+test("resolveExitStatus never maps a failed or killed child to 0", () => {
+  assert.equal(resolveExitStatus({ status: 0, signal: null, error: undefined }), 0);
+  assert.equal(resolveExitStatus({ status: 7, signal: null }), 7);
+  assert.equal(resolveExitStatus({ status: null, signal: "SIGKILL" }), 128 + os.constants.signals.SIGKILL);
+  assert.equal(resolveExitStatus({ status: null, signal: "SIGBOGUS" }), 128);
+  assert.equal(resolveExitStatus({ status: null, signal: null, error: new Error("spawn failed") }), 1);
 });
