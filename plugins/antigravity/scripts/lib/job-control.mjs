@@ -23,6 +23,18 @@ function filterJobsForCurrentSession(jobs, options = {}) {
   return jobs.filter((job) => job.sessionId === sessionId);
 }
 
+export function findLastTaskConversation(cwd, options = {}) {
+  const workspaceRoot = resolveWorkspaceRoot(cwd);
+  const jobs = filterJobsForCurrentSession(sortJobsNewestFirst(listJobs(workspaceRoot)), options);
+  const job = jobs.find(
+    (candidate) =>
+      (candidate.jobClass === "task" || candidate.kind === "task") &&
+      typeof candidate.threadId === "string" &&
+      candidate.threadId
+  );
+  return job ? { jobId: job.id, threadId: job.threadId } : null;
+}
+
 function getJobTypeLabel(job) {
   if (typeof job.kindLabel === "string" && job.kindLabel) {
     return job.kindLabel;

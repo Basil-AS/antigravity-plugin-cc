@@ -58,7 +58,9 @@ export const TOOLS = [
       workspace: { type: "string", description: "Target workspace directory (defaults to current working directory)" },
       write: { type: "boolean", default: false, description: "Allow Antigravity to modify files" },
       background: { type: "boolean", default: false, description: "Run task in the background" },
-      model: { type: "string", description: "Optional Gemini model (defaults to gemini-3.8-flash-medium)" }
+      model: { type: "string", description: "Optional Gemini model (defaults to gemini-3.8-flash-medium)" },
+      effort: { type: "string", enum: ["low", "medium", "high"], description: "Reasoning effort; selects gemini-3.8-flash-<effort> unless model is set" },
+      resume_last: { type: "boolean", default: false, description: "Continue the latest Antigravity task conversation in this workspace" }
     }
   ),
   tool(
@@ -117,6 +119,8 @@ async function handleToolCall(name, args) {
       if (args.write) cliArgs.push("--write");
       if (args.background) cliArgs.push("--background");
       if (args.model) cliArgs.push("--model", args.model);
+      if (args.effort) cliArgs.push("--effort", args.effort);
+      if (args.resume_last) cliArgs.push("--resume-last");
       cliArgs.push("--cwd", cwd, args.prompt);
 
       return await runCliAsync(cliArgs, { cwd });
