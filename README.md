@@ -82,8 +82,9 @@ In Claude Code, run:
 This checks your Node, Git, `agy` binary, Google authentication status, and Gemini quota balance.
 
 ### Staying up to date
-Third-party marketplaces are **not** auto-updated by default, in the CLI or in Claude Desktop (both share `~/.claude/plugins` on a machine). Turn it on once:
+Third-party marketplaces are **not** auto-updated by default, in the CLI or in Claude Desktop (both share `~/.claude/plugins` on a machine). **Claude Desktop has no manual update for third-party plugins:** refreshing the marketplace there ("updated just now") only refreshes the listing, the installed version stays. So turn auto-update on once — from the CLI, since the setting is shared with Desktop:
 ```
+claude            # interactive session
 /plugin  →  Marketplaces  →  google-antigravity  →  Enable auto-update
 ```
 New releases then show `Plugin updated: agy · Run /reload-plugins to apply`. To update manually:
@@ -91,7 +92,7 @@ New releases then show `Plugin updated: agy · Run /reload-plugins to apply`. To
 claude plugin marketplace update google-antigravity
 claude plugin update agy@google-antigravity
 ```
-then `/reload-plugins` (or start a new session). Cloud sessions (claude.ai/code) do not load locally installed plugins. If you added the marketplace from a local clone instead of GitHub, the plugin loads from that folder: `git pull` there and `/reload-plugins`.
+then `/reload-plugins` (or start a new session). After a CLI update, **fully restart Claude Desktop** (including the tray icon) so it loads the new version; on Windows close Desktop before updating, since the running plugin process can hold its files. Cloud sessions (claude.ai/code) do not load locally installed plugins. If you added the marketplace from a local clone instead of GitHub, the plugin loads from that folder: `git pull` there and `/reload-plugins`.
 
 ---
 
