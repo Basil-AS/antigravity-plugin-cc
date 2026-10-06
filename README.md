@@ -81,6 +81,18 @@ In Claude Code, run:
 ```
 This checks your Node, Git, `agy` binary, Google authentication status, and Gemini quota balance.
 
+### Staying up to date
+Third-party marketplaces are **not** auto-updated by default, in the CLI or in Claude Desktop (both share `~/.claude/plugins` on a machine). Turn it on once:
+```
+/plugin  →  Marketplaces  →  google-antigravity  →  Enable auto-update
+```
+New releases then show `Plugin updated: agy · Run /reload-plugins to apply`. To update manually:
+```bash
+claude plugin marketplace update google-antigravity
+claude plugin update agy@google-antigravity
+```
+then `/reload-plugins` (or start a new session). Cloud sessions (claude.ai/code) do not load locally installed plugins. If you added the marketplace from a local clone instead of GitHub, the plugin loads from that folder: `git pull` there and `/reload-plugins`.
+
 ---
 
 ## 💻 Slash Commands Reference
@@ -207,6 +219,18 @@ npm test
 ℹ pass 11
 ℹ fail 0
 ```
+
+---
+
+## 🚢 Releasing
+
+Clients only see a new release when `plugins/antigravity/.claude-plugin/plugin.json` `version` changes (it takes precedence over `marketplace.json` and pins the cache directory `~/.claude/plugins/cache/google-antigravity/agy/<version>`). Guardrails enforce it:
+
+- `npm run version:bump -- patch|minor|major|X.Y.Z` sets the version in `plugin.json`, both `marketplace.json` fields and `package.json` at once.
+- `npm run release:check` (CI on every PR, against the base branch) fails when the manifests disagree or when `plugins/` changed without a version bump.
+- The release workflow refuses a tag that differs from the manifests and re-runs tests and `claude plugin validate`.
+
+Flow: branch → change → `npm run version:bump -- <level>` → PR → green CI → merge → `gh release create vX.Y.Z --target main --generate-notes`.
 
 ---
 
