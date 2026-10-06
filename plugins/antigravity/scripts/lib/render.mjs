@@ -45,6 +45,14 @@ function escapeMarkdownCell(value) {
     .trim();
 }
 
+function describeAuth(auth) {
+  if (!auth) return "unknown";
+  if (auth.authenticated === true) return `Authenticated (${auth.source ?? auth.authMethod})`;
+  if (auth.checkSkipped) return "check skipped by setting";
+  if (auth.authenticated === false) return "NOT AUTHENTICATED (agy asked for a login)";
+  return "unknown (not blocking)";
+}
+
 export function renderSetupReport(setupData) {
   const lines = [
     "# Antigravity CLI Setup",
@@ -55,7 +63,7 @@ export function renderSetupReport(setupData) {
     `- **Node.js:** ${setupData.node.version} (${setupData.node.available ? "OK" : "FAILED"})`,
     `- **Git:** ${setupData.git.version} (${setupData.git.available ? "OK" : "FAILED"})`,
     `- **Antigravity CLI (agy):** ${setupData.agy.version || "not found"} (${setupData.agy.available ? "OK" : "FAILED"})`,
-    `- **Google Authentication:** ${setupData.auth.authenticated ? `Authenticated (${setupData.auth.authMethod})` : "NOT AUTHENTICATED"}`
+    `- **Google Authentication:** ${describeAuth(setupData.auth)}`
   ];
 
   if (setupData.quota && setupData.quota.available) {
@@ -70,11 +78,26 @@ export function renderSetupReport(setupData) {
     }
   }
 
-  if (!setupData.auth.authenticated) {
+  const auth = setupData.auth ?? {};
+  if (auth.authenticated !== true) {
+    lines.push("", "## Authentication check", `- **Source:** ${auth.source ?? "none"}${auth.detail ? ` — ${auth.detail}` : ""}`);
+    if ((auth.checkedPaths ?? []).length > 0) {
+      lines.push(`- **Token files checked (agy <= 1.2):** ${auth.checkedPaths.map((p) => `\`${p}\``).join(", ")}`);
+    }
+    lines.push(`- **Check skipped:** ${auth.checkSkipped ? "yes (`--skip-auth-check` / `AGY_SKIP_AUTH_CHECK=1`)" : "no"}`);
+  }
+  if (auth.authenticated === false && !auth.checkSkipped) {
     lines.push(
       "",
       "> [!IMPORTANT]",
-      "> You need to authenticate with Google. Run `agy` interactively in your terminal to complete login."
+      "> `agy` itself reports no Google login. Run `agy` interactively in a terminal to log in.",
+      "> If you are already logged in and this is wrong, run `/agy:setup --skip-auth-check` (persistent; applies to subagents too). Undo with `--enforce-auth-check`."
+    );
+  } else if (auth.authenticated === null && !auth.checkSkipped) {
+    lines.push(
+      "",
+      "> [!NOTE]",
+      "> Login state could not be confirmed; runs are not blocked. A login prompt during a run is reported as exit 77."
     );
   }
 

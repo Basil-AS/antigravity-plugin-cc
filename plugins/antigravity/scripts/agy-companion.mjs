@@ -13,6 +13,8 @@ import {
   assertAgyAuthenticated,
   getAgyAvailability,
   getAgyAuthStatus,
+  isAuthCheckSkipped,
+  saveCompanionSettings,
   runAgyTurnWithQuota
 } from "./lib/agy.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
@@ -149,7 +151,7 @@ function loadSystemConstraints() {
 
 async function handleSetup(argv) {
   const { options } = parseArgs(argv, {
-    booleanOptions: ["json", "enable-review-gate", "disable-review-gate"]
+    booleanOptions: ["json", "enable-review-gate", "disable-review-gate", "skip-auth-check", "enforce-auth-check"]
   });
 
   const cwd = process.cwd();
@@ -164,11 +166,17 @@ async function handleSetup(argv) {
   const nodeCheck = binaryAvailable("node", ["--version"]);
   const gitCheck = binaryAvailable("git", ["--version"]);
   const agy = getAgyAvailability();
-  const auth = getAgyAuthStatus();
+  if (options["skip-auth-check"]) {
+    saveCompanionSettings({ skipAuthCheck: true });
+  } else if (options["enforce-auth-check"]) {
+    saveCompanionSettings({ skipAuthCheck: false });
+  }
+  const authCheckSkipped = isAuthCheckSkipped();
+  const auth = agy.available ? { ...getAgyAuthStatus({ fresh: true }), checkSkipped: authCheckSkipped } : { authenticated: null, checkSkipped: authCheckSkipped, checkedPaths: [], source: "none", detail: "agy not installed" };
   // An unauthenticated agy blocks the /usage probe on an OAuth prompt; skip it.
-  const quota = agy.available && auth.authenticated ? probeAgyUsage({ cwd }) : null;
+  const quota = agy.available && auth.authenticated !== false ? probeAgyUsage({ cwd }) : null;
 
-  const ready = nodeCheck.available && gitCheck.available && agy.available && auth.authenticated;
+  const ready = nodeCheck.available && gitCheck.available && agy.available && (auth.authenticated !== false || authCheckSkipped);
 
   const data = {
     ready,
@@ -220,6 +228,9 @@ function buildTaskPrompt({ taskText, isolation, workspaceRoot, callerRel, write,
   if (verify.length > 0) {
     lines.push(`After you finish, the companion will itself run and attach the output of: ${verify.map((c) => `\`${c}\``).join(", ")}.`);
   }
+  lines.push(
+    "End your report with a `## Unverified` section listing every claim you did not check line by line against the code or data (write `None` if you checked everything)."
+  );
   lines.push("", "Task:", taskText);
   return lines.join("\n");
 }
@@ -336,7 +347,14 @@ async function executeTask({ workspaceRoot, jobId, request, progress }) {
   }
   if (!request.write) removeTaskIsolation(isolation, workspaceRoot);
 
-  const sections = [result.response.trimEnd()];
+  // Links into the deleted temp copy are useless to the caller; point them at
+  // the real workspace (for write jobs the files exist there after apply).
+  const response = rewriteIsolationPaths(result.response, isolation, workspaceRoot);
+  result = { ...result, response, caveats: extractCaveats(response) };
+  const sections = [];
+  const caveatText = renderCaveats(result.caveats);
+  if (caveatText) sections.push(caveatText);
+  sections.push(response.trimEnd());
   const isolationText = renderIsolationSection(jobId, finalIsolation, escaped);
   if (isolationText) sections.push(isolationText);
   const verifyText = renderVerifications(verifications);
