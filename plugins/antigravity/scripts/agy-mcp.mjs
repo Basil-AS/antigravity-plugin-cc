@@ -244,7 +244,7 @@ async function main() {
         try {
           const parsed = JSON.parse(output);
           contentText = JSON.stringify(parsed, null, 2);
-          quotaExhausted = parsed?.quotaExhausted === true;
+          quotaExhausted = parsed?.quotaExhausted === true || parsed?.authRequired === true;
         } catch {}
 
         const response = {

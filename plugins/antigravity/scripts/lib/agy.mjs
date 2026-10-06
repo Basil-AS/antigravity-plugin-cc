@@ -67,6 +67,41 @@ export function getAgyAuthStatus() {
   };
 }
 
+export const AUTH_ERROR_CODE = "AGY_NOT_AUTHENTICATED";
+export const AUTH_EXIT_CODE = 77; // EX_NOPERM: needs an interactive login first
+
+const AUTH_REQUIRED_PATTERN = /Authentication required|visit the URL to log in|Waiting for authentication/i;
+
+export class AgyAuthError extends Error {
+  constructor(detail = null) {
+    super(
+      "Antigravity CLI is not logged in to Google. Run `agy` once in a terminal to log in, then retry." +
+        (detail ? ` ${detail}` : "")
+    );
+    this.name = "AgyAuthError";
+    this.code = AUTH_ERROR_CODE;
+  }
+
+  toJSON() {
+    return { error: this.message, code: this.code, authRequired: true };
+  }
+}
+
+export function isAuthRequiredText(text) {
+  return AUTH_REQUIRED_PATTERN.test(String(text ?? ""));
+}
+
+// Without a login agy prints an OAuth URL and blocks ~60s waiting for it, so
+// check the token before spending a quota probe or a turn on it.
+// AGY_SKIP_AUTH_CHECK=1 bypasses the file heuristic if agy moves its token.
+export function assertAgyAuthenticated(status = null, env = process.env) {
+  if (env.AGY_SKIP_AUTH_CHECK === "1") return;
+  const auth = status ?? getAgyAuthStatus();
+  if (!auth.authenticated) {
+    throw new AgyAuthError();
+  }
+}
+
 export function formatAgyTimeout(timeoutMs) {
   if (!timeoutMs || timeoutMs <= 0) return `${DEFAULT_PRINT_TIMEOUT_SECONDS}s`;
   const sec = Math.max(5, Math.round(timeoutMs / 1000));
@@ -284,6 +319,7 @@ function quotaErrorAfterFailure(cwd, detailText) {
 // guard.maxWaitMs for the reset) before starting, and turn agy's own
 // quota/rate-limit failures into an AgyQuotaError with the reset time.
 export async function runAgyTurnWithQuota(options = {}, guard = {}) {
+  assertAgyAuthenticated();
   await ensureGeminiQuota({ cwd: options.cwd, maxWaitMs: guard.maxWaitMs ?? 0, onWait: guard.onWait });
 
   let result;
@@ -291,6 +327,9 @@ export async function runAgyTurnWithQuota(options = {}, guard = {}) {
     result = await runAgyTurn(options);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (isAuthRequiredText(message)) {
+      throw new AgyAuthError();
+    }
     if (isQuotaErrorText(message)) {
       throw quotaErrorAfterFailure(options.cwd, message);
     }
@@ -299,6 +338,9 @@ export async function runAgyTurnWithQuota(options = {}, guard = {}) {
 
   if (result.status !== "SUCCESS") {
     const text = `${result.stderr ?? ""}\n${result.response ?? ""}`;
+    if (isAuthRequiredText(result.stderr)) {
+      throw new AgyAuthError();
+    }
     if (isQuotaErrorText(text)) {
       throw quotaErrorAfterFailure(options.cwd, text);
     }

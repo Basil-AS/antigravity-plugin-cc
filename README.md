@@ -154,6 +154,8 @@ Antigravity meters Gemini in two windows (weekly and five-hour); all Gemini mode
 
 The threshold defaults to 2% and can be changed with `AGY_QUOTA_MIN_PERCENT`.
 
+**Login check.** Without a Google login agy prints an OAuth URL and blocks for about a minute. Tasks and reviews therefore check for the agy token first and fail immediately with exit code **77** and `Antigravity CLI is not logged in to Google. Run \`agy\` once in a terminal to log in, then retry.` (`--json`/MCP: `authRequired: true`, MCP `isError`); a login prompt that still appears mid-turn maps to the same error, `/agy:setup` skips the quota probe, and the stop gate fails open. `AGY_SKIP_AUTH_CHECK=1` bypasses the token-file check if agy ever stores its token elsewhere.
+
 ---
 
 ## 🤖 Stdio MCP Server (Autonomous Mode)

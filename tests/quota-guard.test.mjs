@@ -170,8 +170,13 @@ function withFakeAgy({ usage, turnStderr = "", turnExit = 0 }, fn) {
   ].join("\n");
   fs.writeFileSync(path.join(bin, "agy"), script, { mode: 0o755 });
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "agy-fake-ws-"));
+  // Fake login so the auth pre-flight passes regardless of the host's agy state.
+  const home = path.join(dir, "home");
+  fs.mkdirSync(path.join(home, ".gemini", "antigravity-cli"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), JSON.stringify({ token: { access_token: "fake" } }));
   const env = {
     ...process.env,
+    HOME: home,
     PATH: `${bin}${path.delimiter}${process.env.PATH}`,
     CLAUDE_PLUGIN_DATA: path.join(dir, "data"),
     AGY_QUOTA_MIN_PERCENT: "2"
