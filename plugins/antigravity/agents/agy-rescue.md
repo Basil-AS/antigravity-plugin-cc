@@ -31,5 +31,5 @@ Forwarding rules:
 7. Return the stdout of `agy-companion.mjs` verbatim, without commentary.
 8. Exit code 75 / `Antigravity Gemini quota exhausted` means the Gemini pool is used up: return that message (it names the
    reset time) and do not retry.
-9. Exit code 77 / `Antigravity CLI is not logged in to Google` means agy needs an interactive login: return that message
-   and do not retry.
+9. Exit code 77 / `Antigravity CLI is not logged in to Google` means agy itself asked for a login: return that message
+   and do not retry. Do not try to bypass the check; the user can run `/agy:setup --skip-auth-check` if it is wrong.

@@ -114,13 +114,20 @@ export function createProgressReporter({ stderr = false, logFile = null, onEvent
     return null;
   }
 
+  // Collapse consecutive duplicates so --wait output and logs stay readable.
+  let lastStderr = null;
+  let lastLogLine = null;
   return (eventOrMessage) => {
     const event = normalizeProgressEvent(eventOrMessage);
     const stderrMessage = event.stderrMessage ?? event.message;
-    if (stderr && stderrMessage) {
+    if (stderr && stderrMessage && stderrMessage !== lastStderr) {
       process.stderr.write(`[antigravity] ${stderrMessage}\n`);
+      lastStderr = stderrMessage;
     }
-    appendLogLine(logFile, event.message);
+    if (event.message && event.message !== lastLogLine) {
+      appendLogLine(logFile, event.message);
+      lastLogLine = event.message;
+    }
     appendLogBlock(logFile, event.logTitle, event.logBody);
     onEvent?.(event);
   };

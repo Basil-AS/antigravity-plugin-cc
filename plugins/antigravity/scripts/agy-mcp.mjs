@@ -240,20 +240,23 @@ async function main() {
       try {
         const output = await handleToolCall(params.name, params.arguments || {});
         let contentText = output;
-        let quotaExhausted = false;
+        let blocked = false;
         try {
           const parsed = JSON.parse(output);
           contentText = JSON.stringify(parsed, null, 2);
-          quotaExhausted = parsed?.quotaExhausted === true || parsed?.authRequired === true;
+          // The payload keeps quotaExhausted and authRequired distinct: only a
+          // quota error has a resetAt worth waiting for; a missing login never
+          // resolves by waiting.
+          blocked = parsed?.quotaExhausted === true || parsed?.authRequired === true;
         } catch {}
 
         const response = {
           jsonrpc: "2.0",
           id,
           result: {
-            // An exhausted Gemini pool is a tool error the caller should act on
-            // (do the work itself or wait for resetAt), not a normal result.
-            ...(quotaExhausted ? { isError: true } : {}),
+            // Exhausted quota or a missing login is a tool error the caller
+            // should act on (do the work itself / log in), not a normal result.
+            ...(blocked ? { isError: true } : {}),
             content: [{ type: "text", text: contentText }]
           }
         };

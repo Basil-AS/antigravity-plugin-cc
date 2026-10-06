@@ -167,7 +167,9 @@ Antigravity meters Gemini in two windows (weekly and five-hour); all Gemini mode
 
 The threshold defaults to 2% and can be changed with `AGY_QUOTA_MIN_PERCENT`.
 
-**Login check.** Without a Google login agy prints an OAuth URL and blocks for about a minute. Tasks and reviews therefore check for the agy token first and fail immediately with exit code **77** and `Antigravity CLI is not logged in to Google. Run \`agy\` once in a terminal to log in, then retry.` (`--json`/MCP: `authRequired: true`, MCP `isError`); a login prompt that still appears mid-turn maps to the same error, `/agy:setup` skips the quota probe, and the stop gate fails open. `AGY_SKIP_AUTH_CHECK=1` bypasses the token-file check if agy ever stores its token elsewhere.
+**Login check.** Without a Google login agy prints an OAuth URL and blocks for about a minute. Tasks and reviews therefore ask agy first (`agy models`, ~1-2 s; agy 1.2's token file is accepted as a shortcut) and fail immediately with exit code **77** and `Antigravity CLI is not logged in to Google…` (`--json`/MCP: `authRequired: true`, MCP `isError`) only when agy itself asks for a login. An inconclusive check never blocks a run; a login prompt that still appears mid-turn maps to the same error, `/agy:setup` shows where it looked and skips the quota probe, and the stop gate fails open. If the check is wrong for you, `/agy:setup --skip-auth-check` turns it off persistently (it then also applies to the `agy-rescue` subagent; undo with `--enforce-auth-check`); `AGY_SKIP_AUTH_CHECK=1` does the same per process. `authRequired` is never reported as `quotaExhausted`, so `--wait-for-quota` does not wait on a missing login.
+
+**Report hygiene.** File paths agy prints inside the isolated worktree (e.g. `%TEMP%\agy-task-…\repo\src\x.ts`) are rewritten to the real workspace. agy is asked to end with an `## Unverified` section; that section and any sentence admitting a claim was not checked are lifted into a `⚠ Unverified by Antigravity` block at the top of the result. `--wait` progress shows each step once instead of once per streamed token.
 
 ---
 
