@@ -29,6 +29,14 @@ jobs:
       - name: Run Test Suite
         run: npm test
 
+      - name: Release guardrails (versions in sync, bumped when the plugin changed)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node tools/release-check.mjs --base "origin/${{ github.base_ref }}"
+          else
+            node tools/release-check.mjs
+          fi
+
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
