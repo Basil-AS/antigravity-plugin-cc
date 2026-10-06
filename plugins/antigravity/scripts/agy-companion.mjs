@@ -7,7 +7,14 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { normalizeArgv, parseArgs } from "./lib/args.mjs";
-import { getAgyAvailability, getAgyAuthStatus, runAgyTurnWithQuota } from "./lib/agy.mjs";
+import {
+  AUTH_ERROR_CODE,
+  AUTH_EXIT_CODE,
+  assertAgyAuthenticated,
+  getAgyAvailability,
+  getAgyAuthStatus,
+  runAgyTurnWithQuota
+} from "./lib/agy.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import {
   collectReviewContext,
@@ -100,6 +107,7 @@ function readQuotaWaitMs(options) {
 // Launcher-side check so a background job is not queued against an exhausted
 // pool; the job itself still re-checks (and may wait) right before agy runs.
 function assertQuotaForLaunch(cwd, maxWaitMs) {
+  assertAgyAuthenticated();
   const assessment = assessGeminiQuota(getQuotaSnapshot({ cwd }));
   if (assessment.exhausted && !(assessment.waitMs !== null && assessment.waitMs <= maxWaitMs)) {
     throw quotaErrorFromAssessment(assessment);
@@ -157,7 +165,8 @@ async function handleSetup(argv) {
   const gitCheck = binaryAvailable("git", ["--version"]);
   const agy = getAgyAvailability();
   const auth = getAgyAuthStatus();
-  const quota = agy.available ? probeAgyUsage({ cwd }) : null;
+  // An unauthenticated agy blocks the /usage probe on an OAuth prompt; skip it.
+  const quota = agy.available && auth.authenticated ? probeAgyUsage({ cwd }) : null;
 
   const ready = nodeCheck.available && gitCheck.available && agy.available && auth.authenticated;
 
@@ -989,14 +998,16 @@ async function main() {
   }
 }
 
+const STRUCTURED_EXIT_CODES = { [QUOTA_ERROR_CODE]: QUOTA_EXIT_CODE, [AUTH_ERROR_CODE]: AUTH_EXIT_CODE };
+
 main().catch((err) => {
-  if (err?.code === QUOTA_ERROR_CODE) {
+  if (err?.code in STRUCTURED_EXIT_CODES) {
     if (process.argv.includes("--json")) {
       console.log(JSON.stringify(err.toJSON(), null, 2));
     } else {
       console.error(`Error: ${err.message}`);
     }
-    process.exit(QUOTA_EXIT_CODE);
+    process.exit(STRUCTURED_EXIT_CODES[err.code]);
   }
   console.error(`Error: ${err.message}`);
   process.exit(1);
