@@ -56,6 +56,7 @@ import {
   renderSetupReport,
   renderStatusPayload
 } from "./lib/render.mjs";
+import { extractCaveats, renderCaveats, rewriteIsolationPaths, salvageTaskResult } from "./lib/report.mjs";
 import { validateAgainstSchema } from "./lib/schema-validate.mjs";
 import {
   getConfig,
@@ -329,6 +330,21 @@ async function executeTask({ workspaceRoot, jobId, request, progress }) {
     throw error;
   }
 
+  try {
+    return finishTask({ workspaceRoot, jobId, request, isolation, result, before, verify, progress });
+  } catch (error) {
+    return salvageTask({ workspaceRoot, jobId, result, error });
+  }
+}
+
+// Gemini already did the work by the time finishTask runs. If it throws, the
+// answer must not be lost (see salvageTaskResult).
+function salvageTask({ workspaceRoot, jobId, result, error }) {
+  const responseFile = resolveJobFile(workspaceRoot, jobId).replace(/\.json$/, ".response.md");
+  return salvageTaskResult({ responseFile, result, error });
+}
+
+function finishTask({ workspaceRoot, jobId, request, isolation, result, before, verify, progress }) {
   // Capture the model's changes before verification runs, so build/test
   // artefacts produced by the checks never end up in the patch.
   const finalIsolation = finalizeTaskIsolation(isolation, {
@@ -509,6 +525,30 @@ async function handleTask(argv) {
   }
 }
 
+function slotTimeoutMs() {
+  const override = Number(process.env.AGY_SLOT_TIMEOUT_MS);
+  return Number.isFinite(override) && override > 0 ? override : 60_000;
+}
+
+// A detached worker that dies before runTrackedJob starts (no free slot, bad
+// request, ...) would otherwise leave its job in "queued" forever.
+function failQueuedJob(workspaceRoot, jobId, error) {
+  const stored = readStoredJob(workspaceRoot, jobId);
+  if (!stored || (stored.status !== "queued" && stored.status !== "running")) return;
+  const message = error instanceof Error ? error.message : String(error);
+  const now = new Date().toISOString();
+  writeJobFile(workspaceRoot, jobId, {
+    ...stored,
+    status: "failed",
+    phase: "failed",
+    pid: null,
+    errorMessage: message,
+    completedAt: now,
+    updatedAt: now
+  });
+  if (stored.logFile) appendLogLine(stored.logFile, `Worker failed before the job started: ${message}`);
+}
+
 async function handleTaskWorker(argv) {
   const { options } = parseArgs(argv, {
     valueOptions: ["cwd", "job-id"]
@@ -528,7 +568,13 @@ async function handleTaskWorker(argv) {
   }
 
   // Acquire job slot to prevent concurrency race on last_conversations.json
-  const slot = await acquireJobSlot(cwd, { timeoutMs: 60_000 });
+  let slot;
+  try {
+    slot = await acquireJobSlot(cwd, { timeoutMs: slotTimeoutMs() });
+  } catch (error) {
+    failQueuedJob(workspaceRoot, jobId, error);
+    throw error;
+  }
 
   const logFile = storedJob.logFile || createJobLogFile(workspaceRoot, jobId, storedJob.title);
   const progress = createProgressReporter({
@@ -627,7 +673,13 @@ async function handleReviewWorker(argv) {
   const request = storedJob.request;
   if (!request) throw new Error(`Stored job ${jobId} is missing request payload`);
 
-  const slot = await acquireJobSlot(cwd, { timeoutMs: 60_000 });
+  let slot;
+  try {
+    slot = await acquireJobSlot(cwd, { timeoutMs: slotTimeoutMs() });
+  } catch (error) {
+    failQueuedJob(workspaceRoot, jobId, error);
+    throw error;
+  }
   const logFile = storedJob.logFile || createJobLogFile(workspaceRoot, jobId, storedJob.title);
   const progress = createProgressReporter({
     stderr: false,
@@ -958,7 +1010,9 @@ function handleCancel(argv) {
 async function main() {
   const [subcommand, ...rest] = process.argv.slice(2);
 
-  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+  const isHelpFlag = (value) => value === "--help" || value === "-h";
+  // `task --help` must print usage, not create a job titled "--help".
+  if (!subcommand || isHelpFlag(subcommand) || isHelpFlag(rest[0])) {
     console.log(
       [
         "Antigravity Companion CLI",

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 // Post-processing of agy's free-text report before it reaches the caller.
 
 function escapeRegExp(text) {
@@ -70,4 +72,36 @@ export function renderCaveats(caveats) {
     "",
     ...caveats.map((c) => `- ${c}`)
   ].join("\n");
+}
+
+// If finalising a finished turn throws (patch capture, verification,
+// rendering), keep the raw answer on disk and in the output, say loudly that
+// post-processing failed, and fail the job so it is never mistaken for clean.
+export function salvageTaskResult({ responseFile, result, error }) {
+  const message = error instanceof Error ? error.message : String(error);
+  const raw = String(result.response ?? "");
+  let saved = true;
+  try {
+    fs.writeFileSync(responseFile, raw, "utf8");
+  } catch {
+    saved = false;
+  }
+  const rendered = [
+    "## ⚠ Post-processing failed",
+    "",
+    `Antigravity finished, but the plugin failed while finalising the result: ${message}`,
+    saved
+      ? `Raw answer saved to \`${responseFile}\`. Any isolated worktree was left in place; inspect it before discarding.`
+      : "The raw answer could not be saved to disk; it is reproduced below.",
+    "",
+    raw.trimEnd(),
+    ""
+  ].join("\n");
+  return {
+    exitStatus: 1,
+    conversationId: result.conversation_id,
+    payload: { ...result, postProcessingError: message, responseFile: saved ? responseFile : null },
+    rendered,
+    summary: `[post-processing failed] ${raw.slice(0, 120).replace(/\r?\n/g, " ")}`
+  };
 }
