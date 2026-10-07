@@ -5,6 +5,7 @@ import process from "node:process";
 
 import { terminateProcessTree } from "./lib/process.mjs";
 import { listJobs, writeJobFile } from "./lib/state.mjs";
+import { sweepOrphanIsolations } from "./lib/task-isolation.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 
 export const SESSION_ID_ENV = "AGY_COMPANION_SESSION_ID";
@@ -56,9 +57,24 @@ function cleanupSessionJobs(cwd, sessionId) {
   }
 }
 
+// Best-effort: a failed sweep must never block the session, but it is reported.
+function sweepAbandonedWorktrees(cwd) {
+  try {
+    const workspaceRoot = resolveWorkspaceRoot(cwd);
+    const keepTempDirs = listJobs(workspaceRoot)
+      .map((job) => job.result?.isolation)
+      .filter((iso) => iso?.write && iso.tempDir && !iso.appliedAt && !iso.discardedAt)
+      .map((iso) => iso.tempDir);
+    sweepOrphanIsolations(workspaceRoot, { keepTempDirs });
+  } catch (error) {
+    process.stderr.write(`[antigravity] orphan worktree sweep failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
 function handleSessionStart(input) {
   appendEnvVar(SESSION_ID_ENV, input.session_id);
   appendEnvVar(PLUGIN_DATA_ENV, process.env[PLUGIN_DATA_ENV]);
+  sweepAbandonedWorktrees(input.cwd || process.cwd());
 }
 
 function handleSessionEnd(input) {

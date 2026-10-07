@@ -11,6 +11,7 @@ import { git } from "./git.mjs";
 // it and hand back a patch that is applied explicitly with `apply`.
 
 const ISOLATION_ROOT_PREFIX = "agy-task-";
+const DEFAULT_ORPHAN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // Ignored dependency/tooling dirs are not part of the snapshot; link them so
 // builds and verification commands work inside the isolated copy.
 const LINKED_DEPENDENCY_DIRS = ["node_modules", ".venv", "venv", "vendor", ".gradle", ".mvn"];
@@ -120,6 +121,37 @@ export function removeTaskIsolation(isolation, workspaceRoot) {
   if (isolation.tempDir && fs.existsSync(isolation.tempDir)) {
     fs.rmSync(isolation.tempDir, { recursive: true, force: true });
   }
+}
+
+// Crashed or abandoned jobs leave registered worktrees under the OS temp dir.
+// Removes this repo's agy-task-* worktrees older than maxAgeMs, except those
+// whose temp dir is listed in `keepTempDirs` (jobs still waiting for apply).
+export function sweepOrphanIsolations(workspaceRoot, { keepTempDirs = [], maxAgeMs = DEFAULT_ORPHAN_MAX_AGE_MS, now = Date.now() } = {}) {
+  const keep = new Set(keepTempDirs.map((dir) => path.resolve(dir)));
+  const tmpRoot = fs.realpathSync(os.tmpdir());
+  const listed = git(workspaceRoot, ["worktree", "list", "--porcelain"]);
+  const removed = [];
+  if (listed.status !== 0) return removed;
+
+  for (const line of listed.stdout.split(/\r?\n/)) {
+    if (!line.startsWith("worktree ")) continue;
+    const workPath = line.slice("worktree ".length);
+    const tempDir = path.dirname(workPath);
+    if (!path.basename(tempDir).startsWith(ISOLATION_ROOT_PREFIX)) continue;
+    if (path.dirname(tempDir) !== tmpRoot && path.dirname(tempDir) !== os.tmpdir()) continue;
+    if (keep.has(path.resolve(tempDir))) continue;
+    let mtimeMs;
+    try {
+      mtimeMs = fs.statSync(tempDir).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (now - mtimeMs < maxAgeMs) continue;
+    removeTaskIsolation({ mode: "worktree", workPath, tempDir }, workspaceRoot);
+    removed.push(tempDir);
+  }
+  git(workspaceRoot, ["worktree", "prune"]);
+  return removed;
 }
 
 export function applyTaskPatch(workspaceRoot, patchFile) {

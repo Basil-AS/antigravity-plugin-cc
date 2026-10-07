@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { extractCaveats, renderCaveats, rewriteIsolationPaths } from "../plugins/antigravity/scripts/lib/report.mjs";
+import { extractCaveats, renderCaveats, rewriteIsolationPaths, salvageTaskResult } from "../plugins/antigravity/scripts/lib/report.mjs";
 import { createProgressReporter } from "../plugins/antigravity/scripts/lib/tracked-jobs.mjs";
 
 test("Windows worktree paths in every spelling map back to the workspace", () => {
@@ -68,4 +68,35 @@ test("progress reporter collapses consecutive duplicate lines", () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("salvageTaskResult keeps the raw answer and fails the job when finalising throws", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "salvage-"));
+  try {
+    const responseFile = path.join(dir, "job.response.md");
+    const out = salvageTaskResult({
+      responseFile,
+      result: { conversation_id: "c1", status: "SUCCESS", response: "Found it in src/a.js:3.\n" },
+      error: new Error("rewriteIsolationPaths is not defined")
+    });
+    assert.equal(out.exitStatus, 1);
+    assert.equal(out.conversationId, "c1");
+    assert.equal(out.payload.postProcessingError, "rewriteIsolationPaths is not defined");
+    assert.equal(fs.readFileSync(responseFile, "utf8"), "Found it in src/a.js:3.\n");
+    assert.match(out.rendered, /Post-processing failed/);
+    assert.match(out.rendered, /Found it in src\/a\.js:3\./);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("salvageTaskResult still returns the answer when it cannot be written to disk", () => {
+  const out = salvageTaskResult({
+    responseFile: path.join(os.tmpdir(), "definitely", "missing", "dir", "x.md"),
+    result: { response: "answer" },
+    error: "boom"
+  });
+  assert.equal(out.payload.responseFile, null);
+  assert.match(out.rendered, /could not be saved/);
+  assert.match(out.rendered, /answer/);
 });
